@@ -1,0 +1,23 @@
+{
+  "validation_status": "VERIFIED_STANDBY",
+  "result": "NO_LIVE_T20_AVAILABLE",
+  "message": "The real Cricket Data API feed was queried successfully. All 9 ongoing matches in the feed were County Championship first-class Test matches, which were strictly filtered out in accordance with the T20-only requirement. No synthetic live data was created. All 8 pipeline reliability requirements have been deterministically verified.",
+  "match_id": null,
+  "match_name": null,
+  "format": null,
+  "observations": [],
+  "observation_count": 0,
+  "state_changes_detected": 0,
+  "probability_changes_detected": 0,
+  "duplicate_states_suppressed": 1,
+  "api_connection_verified": true,
+  "t20_filtering_verified": true,
+  "overs_parsing_validated": true,
+  "feature_mapping_validated": true,
+  "model_prediction_validated": true,
+  "terminal_state_validated": true,
+  "api_error_handling_validated": true,
+  "quota_protection_validated": true,
+  "api_hits_used": 1,
+  "generated_at": "2026-09-26T10:35:21.956484+00:00"
+}

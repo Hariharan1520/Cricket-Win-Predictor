@@ -1,0 +1,101 @@
+match_id,innings,over,ball,batting_team,bowling_team,batter,bowler,current_score,wickets_lost,runs_scored,wicket,win_probability,previous_win_probability,probability_change,absolute_probability_change,target_score,runs_remaining,balls_remaining,current_run_rate,required_run_rate,chasing_team_won
+1477611,2,9,3,South Africa,West Indies,JF Smith,S Joseph,116,5,4,0,0.0,0.9955,-0.9955,0.9955,115,0,63,12.2105,0.0,0
+1144990,2,15,7,India,Australia,KD Karthik,AJ Tye,161,5,4,0,0.0,0.9953,-0.9953,0.9953,159,0,24,10.0625,0.0,0
+1041615,2,19,6,India,West Indies,MS Dhoni,DJ Bravo,244,4,0,1,0.0,0.9736,-0.9736,0.9736,246,2,0,12.2,0.0,0
+1349131,2,14,6,Tanzania,Rwanda,S Thakor,M Akayezu,131,8,4,0,0.0,0.9611,-0.9611,0.9611,129,0,30,8.7333,0.0,0
+1447488,2,19,5,Singapore,Malaysia,Janak Prakash,Rizwan Haider,180,6,0,1,0.0924,0.8636,-0.7712,0.7712,183,3,1,9.0756,18.0,0
+412699,2,19,5,Sri Lanka,India,AD Mathews,A Nehra,161,5,0,1,0.0805,0.8449,-0.7644,0.7644,164,3,1,8.1176,18.0,1
+1522996,2,19,5,Bahrain,Qatar,Yasser Nazir,MM Baig,185,5,0,1,0.1594,0.9219,-0.7625,0.7625,188,3,1,9.3277,18.0,1
+1185314,2,19,5,South Africa,England,D Pretorius,TK Curran,202,6,0,1,0.1712,0.9279,-0.7567,0.7567,205,3,1,10.1849,18.0,0
+1538450,2,19,6,Singapore,Bahrain,H Bharadwaj,Abdul Rauf,209,6,0,0,0.0219,0.7474,-0.7255,0.7255,213,4,1,10.5378,24.0,0
+682931,2,19,5,New Zealand,South Africa,NL McCullum,DW Steyn,168,7,0,1,0.0418,0.7305,-0.6887,0.6887,171,3,1,8.4706,18.0,0
+1185313,2,19,5,England,South Africa,MM Ali,L Ngidi,175,8,0,1,0.0332,0.6816,-0.6484,0.6484,178,3,1,8.8235,18.0,0
+1478871,2,19,5,South Africa,New Zealand,GF Linde,MJ Henry,177,6,0,1,0.0079,0.6261,-0.6182,0.6182,181,4,1,8.9244,24.0,0
+1277976,2,19,5,Pakistan,Bangladesh,Iftikhar Ahmed,Mahmudullah,123,5,0,1,0.2293,0.8461,-0.6168,0.6168,125,2,1,6.2017,12.0,1
+951353,2,19,5,Bangladesh,India,Mahmudullah,HH Pandya,145,8,0,1,0.1313,0.7365,-0.6052,0.6052,147,2,1,7.3109,12.0,0
+565820,2,19,5,India,New Zealand,Yuvraj Singh,JEC Franklin,162,4,0,1,0.122,0.7201,-0.5981,0.5981,168,6,2,8.2373,18.0,0
+1408103,2,19,5,Zimbabwe,Ireland,R Ngarava,BJ McCarthy,146,9,0,1,0.0895,0.6452,-0.5557,0.5557,148,2,1,7.3613,12.0,1
+1336981,2,19,4,Japan,Hong Kong,S Kato,M Hill,138,3,0,1,0.2589,0.8118,-0.5529,0.5529,143,5,2,7.0169,15.0,0
+1298150,2,19,7,India,Pakistan,KD Karthik,Mohammad Nawaz,158,6,0,1,0.3664,0.9146,-0.5482,0.5482,160,2,1,7.9664,12.0,1
+1190750,2,19,5,Scotland,Thailand,SJ Bryce,C Sutthiruang,122,5,0,0,0.2236,0.7703,-0.5467,0.5467,124,2,1,6.1513,12.0,1
+1186490,2,19,5,Maldives,Thailand,Ibrahim Hassan,Md Shafiqul Haque,129,8,0,1,0.0828,0.6253,-0.5425,0.5425,131,2,1,6.5042,12.0,1
+1404391,2,19,6,Zimbabwe,Namibia,C Madande,T Lungameni,196,5,1,0,0.2128,0.7494,-0.5366,0.5366,199,3,1,9.8824,18.0,1
+565811,2,19,5,England,India,JC Buttler,AB Dinda,175,4,1,0,0.1791,0.7069,-0.5278,0.5278,178,3,1,8.8235,18.0,1
+1344787,2,19,5,Oman,Canada,Mohammad Nadeem,Ammar Khalid,189,5,1,0,0.1775,0.7047,-0.5272,0.5272,192,3,1,9.5294,18.0,0
+1476993,2,19,5,Ireland,Pakistan,A Canning,Sadia Iqbal,165,6,0,1,0.0054,0.5321,-0.5267,0.5267,169,4,1,8.3193,24.0,1
+1491724,2,19,5,West Indies,New Zealand,R Powell,KA Jamieson,202,8,0,1,0.0736,0.5958,-0.5222,0.5222,208,6,2,10.2712,18.0,0
+1072321,2,19,5,New Zealand,England,MS Chapman,TK Curran,191,4,1,0,0.0307,0.5405,-0.5098,0.5098,195,4,1,9.6303,24.0,0
+533295,2,19,5,South Africa,India,M Morkel,L Balaji,151,10,0,1,0.0678,0.5738,-0.506,0.506,153,2,1,7.6134,12.0,0
+1415731,2,19,5,Nepal,South Africa,Gulsan Jha,OEG Baartman,114,6,0,0,0.123,0.6202,-0.4972,0.4972,116,2,1,5.7479,12.0,0
+1531154,2,19,5,United States of America,Rwanda,GC Bhogle,MD Bimenyimana,125,5,0,0,0.0268,0.5183,-0.4915,0.4915,128,3,1,6.3025,18.0,0
+1492881,2,0,3,Germany,Bahrain,Shahid Afridi,Ali Dawood,7,0,0,0,0.2259,0.703,-0.4771,0.4771,208,201,118,21.0,10.2203,0
+1552909,2,19,5,Kenya,Rwanda,SO Ngoche,I Ntirenganya,138,8,0,0,0.1076,0.5843,-0.4767,0.4767,140,2,1,6.958,12.0,1
+1422038,2,19,4,Nepal,Netherlands,DS Airee,RE van der Merwe,181,8,0,1,0.3227,0.7974,-0.4747,0.4747,185,4,2,9.2034,12.0,0
+1531160,2,19,5,Vanuatu,Rwanda,V Langiatu,MD Bimenyimana,130,3,0,0,0.007,0.4811,-0.4741,0.4741,134,4,1,6.5546,24.0,0
+1539472,2,19,4,Germany,Denmark,Sajid Liaqat,HAM Shah,115,8,0,1,0.0544,0.5152,-0.4608,0.4608,117,2,1,5.7983,12.0,1
+306989,2,0,4,Bangladesh,Pakistan,Nazimuddin,Shoaib Akhtar,7,0,0,0,0.3649,0.8229,-0.458,0.458,192,185,118,21.0,9.4068,0
+1425125,2,0,3,United States of America,Canada,AGS Gous,RR Joshi,5,1,0,1,0.3181,0.7695,-0.4514,0.4514,169,164,118,15.0,8.339,1
+1549526,2,19,5,Namibia,Zimbabwe,A Busing-Volschenk,B Evans,190,8,0,1,0.0512,0.5002,-0.449,0.449,196,6,2,9.661,18.0,0
+1251953,2,0,2,Ireland,South Africa,PR Stirling,GF Linde,6,1,0,1,0.4316,0.8789,-0.4473,0.4473,166,160,118,18.0,8.1356,0
+1138196,2,19,5,West Indies,New Zealand,AK Peters,AM Peterson,132,7,0,1,0.0135,0.4593,-0.4458,0.4458,135,3,1,6.6555,18.0,0
+573672,2,19,5,Netherlands,Bangladesh,T van der Gugten,Abdur Razzak,127,9,0,1,0.0506,0.4964,-0.4458,0.4458,129,2,1,6.4034,12.0,1
+1172165,2,19,5,India,England,AA Patil,KL Cross,117,6,0,1,0.0132,0.454,-0.4408,0.4408,120,3,1,5.8992,18.0,0
+1494766,2,0,3,Saudi Arabia,Qatar,Faisal Khan,MM Baig,8,0,0,0,0.4727,0.9064,-0.4337,0.4337,190,182,118,24.0,9.2542,1
+1203676,2,19,4,West Indies,Ireland,DJ Bravo,J Little,204,6,0,0,0.4231,0.8512,-0.4281,0.4281,209,5,2,10.3729,15.0,0
+1522985,2,19,4,Qatar,Oman,S Krisheta,Fiza,136,6,0,1,0.0757,0.5029,-0.4272,0.4272,141,5,2,6.9153,15.0,0
+1428156,2,19,3,Netherlands,Ireland,W Barresi,CA Young,154,5,0,1,0.1305,0.5532,-0.4227,0.4227,162,8,3,7.8974,16.0,0
+1203676,2,19,5,West Indies,Ireland,DJ Bravo,J Little,204,7,0,1,0.001,0.4231,-0.4221,0.4221,209,5,1,10.2857,30.0,0
+1522996,2,0,2,Bahrain,Qatar,Asif Ali,MM Baig,6,0,0,0,0.3219,0.7417,-0.4198,0.4198,188,182,118,18.0,9.2542,1
+1298158,2,19,5,Pakistan,Zimbabwe,Mohammad Nawaz,B Evans,128,7,0,1,0.0119,0.4275,-0.4156,0.4156,131,3,1,6.4538,18.0,0
+1422043,2,0,2,Netherlands,Nepal,M Levitt,Karan KC,6,0,0,0,0.3503,0.7652,-0.4149,0.4149,185,179,118,18.0,9.1017,1
+1488327,2,0,3,Bahamas,Cayman Islands,GT Taylor,ROC Dunka,6,0,0,0,0.36,0.7727,-0.4127,0.4127,184,178,118,18.0,9.0508,0
+1303308,2,19,5,Ireland,India,MR Adair,Umran Malik,219,5,1,0,0.138,0.5421,-0.4041,0.4041,226,7,2,11.1356,21.0,0
+1148063,2,19,4,Bangladesh,India,Sanjida Islam,H Kaur,110,6,0,1,0.2948,0.6968,-0.402,0.402,113,3,2,5.5932,9.0,1
+1140069,2,0,2,West Indies,Pakistan,CAK Walton,Mohammad Nawaz (3),6,0,0,0,0.1943,0.5939,-0.3996,0.3996,204,198,118,18.0,10.0678,0
+1488343,2,19,4,Norway,Sweden,Vinay Ravi,J Stanigze,147,8,0,1,0.3536,0.7507,-0.3971,0.3971,150,3,2,7.4746,9.0,1
+1392808,2,19,5,Kuwait,Qatar,Parvindar Kumar,Muhammad Murad,154,9,0,1,0.0109,0.4067,-0.3958,0.3958,157,3,1,7.7647,18.0,0
+1199499,2,19,3,Scotland,Singapore,CS MacLeod,Amjad Mahboob,162,7,0,1,0.1503,0.5439,-0.3936,0.3936,169,7,3,8.3077,14.0,0
+1367723,2,0,2,Portugal,Gibraltar,Kuldeep,BA Pai,4,1,0,1,0.2616,0.6546,-0.393,0.393,167,163,118,12.0,8.2881,1
+520599,2,19,3,New Zealand,South Africa,NL McCullum,M de Lange,160,6,0,1,0.3763,0.7687,-0.3924,0.3924,166,6,3,8.2051,12.0,0
+1546389,2,19,3,Romania,France,Rameez Khan,Noman Amjad,161,6,0,1,0.3839,0.7744,-0.3905,0.3905,167,6,3,8.2564,12.0,0
+1072317,2,0,2,Australia,England,DA Warner,DJ Willey,4,1,0,1,0.3607,0.7509,-0.3902,0.3902,156,152,118,12.0,7.7288,1
+1534049,2,0,3,Austria,Guernsey,Karanbir Singh,LT Bichard,8,0,1,0,0.3999,0.7901,-0.3902,0.3902,197,189,118,24.0,9.6102,0
+1441140,2,0,2,Kenya,Rwanda,RN Patel,Z Bimenyimana,4,1,0,1,0.2455,0.6353,-0.3898,0.3898,169,165,118,12.0,8.3898,1
+951311,2,19,5,Oman,Ireland,Amir Ali,MC Sorensen,152,8,0,1,0.3912,0.7797,-0.3885,0.3885,155,3,2,7.7288,9.0,1
+1503460,2,19,4,United Arab Emirates,Nepal,D Parashar,DS Airee,138,7,0,1,0.3937,0.7814,-0.3877,0.3877,141,3,2,7.0169,9.0,0
+1551071,2,19,5,Serbia,Bulgaria,E Prokic,D Ruynekova,149,5,0,1,0.4017,0.7871,-0.3854,0.3854,155,6,3,7.641,12.0,1
+1490706,2,0,2,Australia,India,G Voll,Renuka Singh,4,1,0,1,0.2302,0.6156,-0.3854,0.3854,171,167,118,12.0,8.4915,1
+1257946,2,0,4,Malaysia,Netherlands,Anwar Arudin,A Dutt,12,1,0,1,0.3929,0.7766,-0.3837,0.3837,192,180,117,24.0,9.2308,0
+1503460,2,19,5,United Arab Emirates,Nepal,Haider Ali,DS Airee,138,8,0,1,0.0103,0.3937,-0.3834,0.3834,141,3,1,6.958,18.0,0
+1478900,2,19,4,Australia,South Africa,GJ Maxwell,L Ngidi,169,8,0,0,0.2445,0.6273,-0.3828,0.3828,173,4,2,8.5932,12.0,1
+1527770,2,0,2,Austria,Cyprus,Karanbir Singh,Lovedeep Singh,6,0,0,0,0.4515,0.8324,-0.3809,0.3809,175,169,118,18.0,8.5932,0
+1327503,2,0,2,Australia,India,AJ Finch,B Kumar,6,0,0,0,0.1633,0.5423,-0.379,0.379,209,203,118,18.0,10.322,1
+1321273,2,0,2,Greece,Sweden,P Magafas,L Karlsson,4,1,0,1,0.4108,0.7882,-0.3774,0.3774,151,147,118,12.0,7.4746,0
+1479934,2,19,5,Uganda,Namibia,R Musamali,JA Diergaardt,137,5,1,1,0.0389,0.4148,-0.3759,0.3759,140,3,1,6.9076,18.0,1
+1345426,2,0,4,India,Australia,S Mandhana,D Brown,6,0,0,0,0.4725,0.8438,-0.3713,0.3713,173,167,118,18.0,8.4915,0
+1499022,2,0,6,Norway,Sweden,Mirab Sajjad,Zara Mohammad,7,0,0,0,0.5307,0.9012,-0.3705,0.3705,176,169,118,21.0,8.5932,0
+1251575,2,19,2,Pakistan,South Africa,Faheem Ashraf,LB Williams,180,6,0,1,0.3781,0.7481,-0.37,0.37,189,9,4,9.3103,13.5,1
+1433362,2,0,2,South Africa,West Indies,Q de Kock,MW Forde,4,1,0,1,0.1948,0.5647,-0.3699,0.3699,176,172,118,12.0,8.7458,0
+1203676,2,19,1,West Indies,Ireland,SE Rutherford,J Little,196,6,0,1,0.2928,0.6604,-0.3676,0.3676,209,13,5,10.2261,15.6,0
+1172165,2,19,4,India,England,BS Fulmali,KL Cross,117,5,0,1,0.454,0.8205,-0.3665,0.3665,120,3,2,5.9492,9.0,0
+1443773,2,19,5,Czech Republic,Spain,S Grover,Raja Adeel,173,6,0,1,0.0224,0.3885,-0.3661,0.3661,180,7,2,8.7966,21.0,0
+1083450,2,0,2,Sri Lanka,Bangladesh,MDKJ Perera,Shakib Al Hasan,4,1,0,1,0.1883,0.5543,-0.366,0.366,177,173,118,12.0,8.7966,0
+1138196,2,19,4,West Indies,New Zealand,B Cooper,AM Peterson,132,6,0,1,0.4593,0.8238,-0.3645,0.3645,135,3,2,6.7119,9.0,0
+1117822,2,19,5,ICC World XI,Pakistan,HM Amla,Rumman Raees,169,3,1,0,0.2165,0.5766,-0.3601,0.3601,175,6,2,8.5932,18.0,1
+1031435,2,0,3,South Africa,England,JT Smuts,DJ Willey,5,0,0,0,0.2992,0.6587,-0.3595,0.3595,182,177,118,15.0,9.0,0
+1296033,2,0,3,Malaysia,Sri Lanka,WA Duraisingam,Tharika Sewwandi,5,0,0,0,0.355,0.7131,-0.3581,0.3581,176,171,118,15.0,8.6949,0
+1007655,2,19,4,India,Zimbabwe,R Dhawan,N Madziva,165,6,0,0,0.0573,0.4148,-0.3575,0.3575,171,6,2,8.3898,18.0,0
+1197509,2,0,3,Botswana,Namibia,T Perera,JN Frylinck,5,0,0,0,0.3648,0.7216,-0.3568,0.3568,175,170,118,15.0,8.6441,0
+1338042,2,0,3,New Zealand,Australia,B Bezuidenhout,ML Schutt,5,1,0,0,0.274,0.6301,-0.3561,0.3561,174,169,118,15.0,8.5932,0
+1243020,2,0,2,South Africa,Pakistan,JN Malan,Shaheen Shah Afridi,4,1,0,1,0.4734,0.8274,-0.354,0.354,145,141,118,12.0,7.1695,1
+1506189,2,19,5,Norway,Austria,Prachi Kumari,P Sabu,91,9,0,1,0.1619,0.5148,-0.3529,0.3529,92,1,1,4.5882,6.0,1
+1393313,2,0,4,Rwanda,Uganda,D Ndikubwimana,D Wabwire,10,0,0,0,0.6186,0.9691,-0.3505,0.3505,193,183,118,30.0,9.3051,0
+1419824,2,19,1,Bangladesh,Sri Lanka,Rishad Hossain,MD Shanaka,195,7,0,1,0.2954,0.6448,-0.3494,0.3494,207,12,5,10.1739,14.4,0
+1249208,2,0,2,Sri Lanka,England,MD Gunathilaka,DJ Willey,4,1,0,1,0.1638,0.5123,-0.3485,0.3485,181,177,118,12.0,9.0,0
+1277976,2,19,2,Pakistan,Bangladesh,Sarfraz Ahmed,Mahmudullah,117,3,0,1,0.3728,0.7195,-0.3467,0.3467,125,8,4,6.0517,12.0,1
+1412530,2,19,5,Indonesia,Philippines,GY Prastama,KDA Lukies,155,8,0,0,0.1709,0.5172,-0.3463,0.3463,159,4,2,7.8814,12.0,0
+531982,2,19,3,Bangladesh,West Indies,Nasir Hossain,R Rampaul,128,7,0,1,0.2368,0.5825,-0.3457,0.3457,133,5,3,6.5641,10.0,1
+1541616,2,19,3,Serbia,Bulgaria,N Nojic,D Ruynekova,131,5,0,1,0.2706,0.6157,-0.3451,0.3451,139,8,4,6.7759,12.0,0
+1249239,2,19,4,New Zealand,Australia,HM Rowe,NJ Carey,126,6,0,0,0.1693,0.5142,-0.3449,0.3449,130,4,2,6.4068,12.0,1
+1298178,2,0,3,England,India,JC Buttler,B Kumar,5,0,0,0,0.4254,0.7695,-0.3441,0.3441,169,164,118,15.0,8.339,1
+1158356,2,0,3,Lesotho,Sierra Leone,R Khasana,Aminata Kamara,5,1,0,0,0.4263,0.7698,-0.3435,0.3435,158,153,118,15.0,7.7797,0

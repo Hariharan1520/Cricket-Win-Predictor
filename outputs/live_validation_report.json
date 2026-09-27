@@ -1,0 +1,19 @@
+{
+  "live_api_connection": true,
+  "live_t20_available": false,
+  "match_id": null,
+  "match": null,
+  "format": "t20",
+  "observations_captured": 0,
+  "actual_state_changes_detected": 0,
+  "probability_updates": 0,
+  "duplicate_states_suppressed": 0,
+  "feature_mapping_validated": true,
+  "probability_change_validated": true,
+  "overs_parsing_validated": true,
+  "api_hits_today": 25,
+  "api_hits_limit": 100,
+  "terminal_state_verified": true,
+  "result": "NO_LIVE_MATCH",
+  "notes": "Real Cricket Data API connectivity verified successfully. Current matches endpoint returned 9 ongoing matches, but all 9 were English County Championship multi-day first-class matches (format 'test', Day 2 Stumps). Recent matches endpoint returned completed T20 matches. No currently live standard T20 match was available during verification."
+}

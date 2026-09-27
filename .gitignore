@@ -1,0 +1,39 @@
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+.env.local
+.env.*.local
+
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyc
+*$py.class
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Virtual Environments
+venv/
+.venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+
+# Frontend
+node_modules/
+frontend/node_modules/
+dist/
+frontend/dist/
+
+# Large datasets and raw bulk files (>100MB GitHub limit)
+data/raw/*.json
+!data/raw/.gitkeep
+data/processed/*.csv
+!data/processed/.gitkeep
+models/random_forest_win_probability.joblib
+outputs/win_probability_swings.csv
+

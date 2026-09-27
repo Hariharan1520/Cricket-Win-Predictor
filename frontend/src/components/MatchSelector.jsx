@@ -1,0 +1,99 @@
+import React from 'react';
+import { ChevronDown } from 'lucide-react';
+
+export default function MatchSelector({
+  matches,
+  selectedMatchId,
+  onSelectMatch,
+  title = "Live Matches",
+  isDemo = false,
+}) {
+  if (!matches || matches.length === 0) return null;
+
+  const getMatchSituation = (m) => {
+    // If demo match, show exact realistic chase situations
+    if (m.match_id === 'demo-match-1') {
+      return {
+        teams: 'AUSTRALIA vs INDIA',
+        liveMeta: 'T20 · LIVE · 16.0 OV',
+        situation: 'India need 48 from 24',
+      };
+    }
+    if (m.match_id === 'demo-match-2') {
+      return {
+        teams: 'ENGLAND vs SOUTH AFRICA',
+        liveMeta: 'T20 · LIVE · 17.0 OV',
+        situation: 'South Africa need 28 from 18',
+      };
+    }
+
+    // Generic match fallback
+    const teams = m.teams || (m.name ? m.name.split(' vs ') : ['Team A', 'Team B']);
+    const teamA = (teams[0] || 'Team A').toUpperCase();
+    const teamB = (teams[1] || 'Team B').toUpperCase();
+    const format = m.format || 'T20';
+
+    return {
+      teams: `${teamA} vs ${teamB}`,
+      liveMeta: `${format} · LIVE`,
+      situation: m.status || 'Chase in progress',
+    };
+  };
+
+  return (
+    <div id="live-matches" className="bg-white border-b border-[#E3EAF0] py-2.5 px-4 sm:px-6">
+      <div className="max-w-7xl mx-auto flex items-center justify-between gap-3">
+        {/* Horizontal Match Strip */}
+        <div className="flex items-center gap-2.5 overflow-x-auto pb-1 scrollbar-none flex-1">
+          {matches.map((m) => {
+            const isSelected = m.match_id === selectedMatchId;
+            const info = getMatchSituation(m);
+
+            return (
+              <button
+                key={m.match_id}
+                onClick={() => onSelectMatch(m.match_id)}
+                className={`flex-shrink-0 text-left px-3.5 py-2 rounded-xl border transition-all ${
+                  isSelected
+                    ? 'bg-[#EAF8F2] border-[#0B9F72] shadow-2xs'
+                    : 'bg-white border-[#E3EAF0] hover:bg-[#F5F8FB] hover:border-[#D0D9E2]'
+                }`}
+              >
+                {/* Teams Line */}
+                <div className="flex items-center gap-1.5">
+                  <span
+                    className={`w-2 h-2 rounded-full ${
+                      isSelected ? 'bg-[#0B9F72]' : 'bg-[#8A98A8]'
+                    }`}
+                  />
+                  <span className="text-xs font-bold text-[#172B4D] tracking-tight whitespace-nowrap">
+                    {info.teams}
+                  </span>
+                </div>
+
+                {/* Live State & Overs */}
+                <div className="text-[10.5px] font-mono font-semibold text-[#8A98A8] mt-0.5 pl-3.5">
+                  {info.liveMeta}
+                </div>
+
+                {/* Chase Equation */}
+                <div className="text-[11px] font-semibold text-[#0B9F72] mt-0.5 pl-3.5 whitespace-nowrap">
+                  {info.situation}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* All Matches Dropdown */}
+        <button
+          className="flex-shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white hover:bg-[#F5F8FB] border border-[#E3EAF0] text-[#667085] hover:text-[#172B4D] text-xs font-semibold transition shadow-2xs"
+          title="All matches list"
+        >
+          <span>All Matches</span>
+          <ChevronDown className="w-3.5 h-3.5 text-[#8A98A8]" />
+        </button>
+      </div>
+    </div>
+  );
+}

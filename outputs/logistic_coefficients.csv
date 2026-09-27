@@ -1,0 +1,9 @@
+feature,coefficient,effect_direction
+current_score,1.1849,Positive (higher win prob)
+balls_remaining,0.4224,Positive (higher win prob)
+current_run_rate,0.27,Positive (higher win prob)
+target_score,-0.082,Negative (lower win prob)
+overs_completed,-0.4226,Negative (lower win prob)
+runs_remaining,-1.0027,Negative (lower win prob)
+wickets_lost,-1.0948,Negative (lower win prob)
+required_run_rate,-8.6677,Negative (lower win prob)

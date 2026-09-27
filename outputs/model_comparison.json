@@ -1,0 +1,33 @@
+{
+    "random_state": 42,
+    "feature_names": [
+        "target_score",
+        "current_score",
+        "wickets_lost",
+        "runs_remaining",
+        "balls_remaining",
+        "overs_completed",
+        "current_run_rate",
+        "required_run_rate"
+    ],
+    "train_match_count": 4450,
+    "test_match_count": 1113,
+    "train_row_count": 471169,
+    "test_row_count": 117790,
+    "logistic_regression": {
+        "accuracy": 0.8222,
+        "precision": 0.8015,
+        "recall": 0.7933,
+        "f1": 0.7974,
+        "roc_auc": 0.9109,
+        "brier_score": 0.1204
+    },
+    "random_forest": {
+        "accuracy": 0.8211,
+        "precision": 0.8002,
+        "recall": 0.792,
+        "f1": 0.7961,
+        "roc_auc": 0.9113,
+        "brier_score": 0.1209
+    }
+}

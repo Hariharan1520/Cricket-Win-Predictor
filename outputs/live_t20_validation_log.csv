@@ -1,0 +1,2 @@
+timestamp,match_id,match_name,format,innings,batting_team,bowling_team,target_score,current_score,wickets_lost,runs_remaining,balls_remaining,overs_completed,display_overs,current_run_rate,required_run_rate,chasing_probability,defending_probability,probability_change,absolute_probability_change,api_status
+2026-09-26T10:35:21.956484+00:00,NONE_AVAILABLE,No Live T20/T20I Match In Progress,T20/T20I,0,N/A,N/A,0.0,0.0,0,0.0,120,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,NO_LIVE_T20_AVAILABLE (Strict T20-only filtering correctly excluded all non-T20 matches)

@@ -1,0 +1,12 @@
+scenario_name,scenario_runs,scenario_wickets,current_score,current_wickets,new_score,new_wickets,target_score,runs_remaining,balls_remaining,overs_completed,current_win_probability,simulated_win_probability,probability_change,terminal_state,status
+Dot Over,0,0,142.0,4,142.0,4,190.0,48.0,18,17.0,0.406,0.0995,-0.3065,Non-Terminal,Valid
+Low Scoring Over,4,0,142.0,4,146.0,4,190.0,44.0,18,17.0,0.406,0.1909,-0.2151,Non-Terminal,Valid
+Moderate Over,6,0,142.0,4,148.0,4,190.0,42.0,18,17.0,0.406,0.2562,-0.1498,Non-Terminal,Valid
+Good Over,8,0,142.0,4,150.0,4,190.0,40.0,18,17.0,0.406,0.3348,-0.0712,Non-Terminal,Valid
+Strong Over,10,0,142.0,4,152.0,4,190.0,38.0,18,17.0,0.406,0.4237,0.0177,Non-Terminal,Valid
+Very Good Over,12,0,142.0,4,154.0,4,190.0,36.0,18,17.0,0.406,0.5178,0.1118,Non-Terminal,Valid
+Excellent Over,15,0,142.0,4,157.0,4,190.0,33.0,18,17.0,0.406,0.6546,0.2486,Non-Terminal,Valid
+Explosive Over,18,0,142.0,4,160.0,4,190.0,30.0,18,17.0,0.406,0.7699,0.3639,Non-Terminal,Valid
+6 runs + 1 wicket,6,1,142.0,4,148.0,5,190.0,42.0,18,17.0,0.406,0.1784,-0.2276,Non-Terminal,Valid
+10 runs + 1 wicket,10,1,142.0,4,152.0,5,190.0,38.0,18,17.0,0.406,0.3166,-0.0894,Non-Terminal,Valid
+15 runs + 1 wicket,15,1,142.0,4,157.0,5,190.0,33.0,18,17.0,0.406,0.5443,0.1383,Non-Terminal,Valid

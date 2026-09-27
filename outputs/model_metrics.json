@@ -1,0 +1,25 @@
+{
+    "model_name": "Logistic Regression (StandardScaler + LogisticRegression)",
+    "random_state": 42,
+    "features": [
+        "target_score",
+        "current_score",
+        "wickets_lost",
+        "runs_remaining",
+        "balls_remaining",
+        "overs_completed",
+        "current_run_rate",
+        "required_run_rate"
+    ],
+    "total_matches": 5563,
+    "training_matches": 4450,
+    "testing_matches": 1113,
+    "training_rows": 471169,
+    "testing_rows": 117790,
+    "accuracy": 0.8222,
+    "precision": 0.8015,
+    "recall": 0.7933,
+    "f1": 0.7974,
+    "roc_auc": 0.9109,
+    "brier_score": 0.1204
+}

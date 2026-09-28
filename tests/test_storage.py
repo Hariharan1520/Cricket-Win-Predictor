@@ -420,6 +420,152 @@ class TestTwoMatchRetention(unittest.TestCase):
         self.assertLessEqual(self.session.query(Match).count(), 2)
         self.assertEqual(summary["total_stored_matches"], 2)
 
+    def test_nineteen_provider_matches_stores_exactly_two(self):
+        """Scenario 1: 19 provider matches -> exactly 2 stored, no multiple insertions/prunings."""
+        raw_list = [
+            {"id": f"m-{i:02d}", "name": f"Match {i}", "matchType": "t20", "matchEnded": True, "date": f"2026-09-{i:02d}"}
+            for i in range(1, 20)
+        ]
+        self.mock_api.get_matches.return_value = raw_list
+        summary = self.manager.sync_recent_matches(limit=25)
+        self.assertEqual(self.session.query(Match).count(), 2)
+        self.assertEqual(summary["total_stored_matches"], 2)
+        self.assertEqual(summary["matches_stored"], 2)
+        # Verify the 2 stored matches are the newest: m-19 and m-18
+        stored_ids = {m.match_id for m in self.session.query(Match).all()}
+        self.assertEqual(stored_ids, {"m-19", "m-18"})
+
+    def test_existing_ab_plus_provider_cd_leaves_only_cd(self):
+        """Scenario 2: Existing A,B in DB + provider returning C,D -> only C,D remain in DB."""
+        # Seed A and B
+        mA = Match(match_id="mA", name="Match A", format="T20", match_date="2026-09-01", stored_at=datetime(2026, 9, 1, 10, 0, tzinfo=timezone.utc))
+        mB = Match(match_id="mB", name="Match B", format="T20", match_date="2026-09-02", stored_at=datetime(2026, 9, 2, 10, 0, tzinfo=timezone.utc))
+        self.session.add_all([mA, mB])
+        self.session.commit()
+        self.assertEqual(self.session.query(Match).count(), 2)
+
+        # Provider returns C and D (newer than A and B)
+        self.mock_api.get_matches.return_value = [
+            {"id": "mC", "name": "Match C", "matchType": "t20", "matchEnded": True, "date": "2026-09-03"},
+            {"id": "mD", "name": "Match D", "matchType": "t20", "matchEnded": True, "date": "2026-09-04"},
+        ]
+        summary = self.manager.sync_recent_matches()
+        self.assertEqual(self.session.query(Match).count(), 2)
+        stored_ids = {m.match_id for m in self.session.query(Match).all()}
+        self.assertEqual(stored_ids, {"mC", "mD"})
+        self.assertEqual(summary["deleted_old_matches"], 2)
+
+    def test_duplicate_provider_match_does_not_duplicate(self):
+        """Scenario 3: Duplicate match in provider response does not create duplicate rows."""
+        self.mock_api.get_matches.return_value = [
+            {"id": "dup-1", "name": "Match Dup", "matchType": "t20", "matchEnded": True, "date": "2026-09-10"},
+            {"id": "dup-1", "name": "Match Dup Copy", "matchType": "t20", "matchEnded": True, "date": "2026-09-10"},
+            {"id": "norm-2", "name": "Match Norm", "matchType": "t20", "matchEnded": True, "date": "2026-09-09"},
+        ]
+        summary = self.manager.sync_recent_matches()
+        self.assertEqual(self.session.query(Match).count(), 2)
+        stored_ids = {m.match_id for m in self.session.query(Match).all()}
+        self.assertEqual(stored_ids, {"dup-1", "norm-2"})
+
+    def test_repeated_sync_still_exactly_two(self):
+        """Scenario 4: Repeated sync keeps database at exactly 2 matches."""
+        self.mock_api.get_matches.return_value = [
+            {"id": "r1", "name": "R1", "matchType": "t20", "matchEnded": True, "date": "2026-09-10"},
+            {"id": "r2", "name": "R2", "matchType": "t20", "matchEnded": True, "date": "2026-09-11"},
+        ]
+        s1 = self.manager.sync_recent_matches()
+        self.assertEqual(s1["matches_stored"], 2)
+        self.assertEqual(self.session.query(Match).count(), 2)
+
+        # Sync again with same matches
+        s2 = self.manager.sync_recent_matches()
+        self.assertEqual(s2["matches_stored"], 0)
+        self.assertEqual(s2["duplicate_matches_count"], 2)
+        self.assertEqual(self.session.query(Match).count(), 2)
+        self.assertEqual(s2["total_stored_matches"], 2)
+
+    def test_newer_match_replaces_oldest(self):
+        """Scenario 5: Newer match replaces oldest match in database."""
+        # Seed A and B
+        mA = Match(match_id="mA", name="Match A", format="T20", match_date="2026-09-01", stored_at=datetime(2026, 9, 1, 10, 0, tzinfo=timezone.utc))
+        mB = Match(match_id="mB", name="Match B", format="T20", match_date="2026-09-02", stored_at=datetime(2026, 9, 2, 10, 0, tzinfo=timezone.utc))
+        self.session.add_all([mA, mB])
+        self.session.commit()
+
+        # Provider returns newer match C (2026-09-03)
+        self.mock_api.get_matches.return_value = [
+            {"id": "mC", "name": "Match C", "matchType": "t20", "matchEnded": True, "date": "2026-09-03"},
+        ]
+        summary = self.manager.sync_recent_matches()
+        self.assertEqual(self.session.query(Match).count(), 2)
+        stored_ids = {m.match_id for m in self.session.query(Match).all()}
+        self.assertEqual(stored_ids, {"mB", "mC"})
+        self.assertNotIn("mA", stored_ids)
+
+    def test_zero_valid_matches_existing_records_unchanged(self):
+        """Scenario 6: Zero valid matches returned -> existing database records remain unchanged."""
+        mA = Match(match_id="mA", name="Match A", format="T20", match_date="2026-09-01")
+        mB = Match(match_id="mB", name="Match B", format="T20", match_date="2026-09-02")
+        self.session.add_all([mA, mB])
+        self.session.commit()
+
+        # Provider returns non-T20 matches only
+        self.mock_api.get_matches.return_value = [
+            {"id": "test-1", "name": "Test Match", "matchType": "test", "matchEnded": True},
+        ]
+        summary = self.manager.sync_recent_matches()
+        self.assertEqual(self.session.query(Match).count(), 2)
+        stored_ids = {m.match_id for m in self.session.query(Match).all()}
+        self.assertEqual(stored_ids, {"mA", "mB"})
+        self.assertEqual(summary["matches_stored"], 0)
+        self.assertEqual(summary["deleted_old_matches"], 0)
+
+    def test_transaction_failure_previous_records_unchanged(self):
+        """Scenario 7: Failure during transaction rolls back and preserves previous records."""
+        mA = Match(match_id="mA", name="Match A", format="T20", match_date="2026-09-01")
+        mB = Match(match_id="mB", name="Match B", format="T20", match_date="2026-09-02")
+        self.session.add_all([mA, mB])
+        self.session.commit()
+
+        # Force error during match processing
+        with patch.object(self.manager, "_process_ball_by_ball", side_effect=RuntimeError("Simulated Failure")):
+            self.mock_api.get_matches.return_value = [
+                {"id": "mC", "name": "Match C", "matchType": "t20", "matchEnded": True, "date": "2026-09-03", "bbbEnabled": True, "deliveries": [{"runs": 4}]},
+            ]
+            summary = self.manager.sync_recent_matches()
+            self.assertIn("Simulated Failure", summary["errors"][0])
+
+        # Previous records are untouched
+        self.assertEqual(self.session.query(Match).count(), 2)
+        stored_ids = {m.match_id for m in self.session.query(Match).all()}
+        self.assertEqual(stored_ids, {"mA", "mB"})
+
+    def test_final_invariant_count_less_equal_two(self):
+        """Scenario 8: Final invariant count <= 2 is strictly enforced, error raised if exceeded."""
+        self.mock_api.get_matches.return_value = [
+            {"id": f"batch-{i}", "name": f"Batch {i}", "matchType": "t20", "matchEnded": True, "date": f"2026-09-{i:02d}"}
+            for i in range(1, 15)
+        ]
+        summary = self.manager.sync_recent_matches()
+        final_count = self.session.query(Match).count()
+        self.assertLessEqual(final_count, 2)
+        self.assertEqual(summary["total_stored_matches"], 2)
+
+    def test_provider_results_with_duplicates_deduplicated_before_selection(self):
+        """Scenario 9: Provider results containing duplicates are deduplicated before selection."""
+        self.mock_api.get_matches.return_value = [
+            {"id": "m-dup", "name": "Dup Match 1", "matchType": "t20", "matchEnded": True, "date": "2026-09-20"},
+            {"id": "m-dup", "name": "Dup Match 2", "matchType": "t20", "matchEnded": True, "date": "2026-09-20"},
+            {"id": "m-second", "name": "Second Match", "matchType": "t20", "matchEnded": True, "date": "2026-09-19"},
+            {"id": "m-third", "name": "Third Match", "matchType": "t20", "matchEnded": True, "date": "2026-09-18"},
+        ]
+        summary = self.manager.sync_recent_matches()
+        self.assertEqual(self.session.query(Match).count(), 2)
+        stored_ids = {m.match_id for m in self.session.query(Match).all()}
+        # The deduplicated m-dup (2026-09-20) and m-second (2026-09-19) must be selected
+        self.assertEqual(stored_ids, {"m-dup", "m-second"})
+        self.assertNotIn("m-third", stored_ids)
+
 
 class TestMatchSyncManagerDetails(unittest.TestCase):
     """Tests for format filtering, ball-by-ball processing, and missing bbb handling."""

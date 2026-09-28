@@ -1,8 +1,8 @@
 {
   "phase": "12.3",
-  "name": "Free Persistent Two-Match Storage Using Neon PostgreSQL",
+  "name": "Free Persistent Two-Match Storage Using Neon PostgreSQL (Bugfix Validated)",
   "status": "VALIDATED",
-  "timestamp": "2026-09-28T12:20:00+05:30",
+  "timestamp": "2026-09-28T14:45:00+05:30",
   "database": {
     "provider": "Neon Serverless PostgreSQL",
     "tier": "Free Tier (0.5 GB persistent cloud storage, $0 cost)",
@@ -20,13 +20,15 @@
   },
   "retention_policy": {
     "max_matches": 2,
-    "ordering": "stored_at DESC, match_date DESC",
+    "algorithm": "Pre-selection of newest up to 2 matches followed by single atomic transaction",
+    "ordering": "recency_dt DESC, stored_at DESC, match_id DESC",
     "atomic_transaction": true,
     "cascade_deletion": {
       "deliveries": true,
       "match_states": true
     },
-    "deduplication": "Updates metadata in-place without duplicate rows",
+    "deduplication": "Provider matches deduplicated by stable match_id before selection; DB metadata updated in-place",
+    "post_sync_invariant_check": "Guaranteed final count <= 2 (raises RuntimeError if count > 2)",
     "section_16_mandatory_test": "PASSED (Start [A, B] -> Insert C -> [B, C] -> Insert C -> [B, C] -> Insert D -> [C, D])"
   },
   "invariants": {
@@ -49,34 +51,22 @@
     "honest_fallback_message": "Historical probability replay unavailable for this match because ball-by-ball data was not provided by the data source."
   },
   "test_results": {
-    "total_automated_tests": 84,
-    "tests_passed": 84,
+    "total_automated_tests": 93,
+    "tests_passed": 93,
     "tests_failed": 0,
     "test_storage": {
-      "total": 28,
-      "passed": 28,
-      "tests_covered": [
-        "A. First match insertion",
-        "B. Second match insertion",
-        "C. Third match insertion deletes oldest",
-        "D. Duplicate match does not create another row",
-        "E. Only one match remains when only one valid match exists",
-        "F. Zero valid matches does not alter database",
-        "G. Failed synchronization rolls back",
-        "H. Recent API reads only from database",
-        "I. Recent API makes zero provider calls",
-        "J. LIVE still uses provider",
-        "K. T20 filtering remains strict",
-        "L. Non-T20 matches are rejected",
-        "M. Model still uses exact 8 features",
-        "N. Model artifact unchanged",
-        "O. analysis_available=false when ball-by-ball is unavailable",
-        "P. analysis_available=true when valid ball-by-ball data exists",
-        "Q. Maximum stored matches is always 2",
-        "R. PostgreSQL schema compiles cleanly",
-        "S. SQLite fallback still works",
-        "T. Database persistence survives separate sessions",
-        "Section 16: Mandatory retention cycle test (A,B -> C -> C -> D)"
+      "total": 37,
+      "passed": 37,
+      "phase_12_3_bugfix_scenarios_verified": [
+        "1. 19 provider matches -> exactly 2 stored, no incremental pruning",
+        "2. Existing A,B in DB + provider returning C,D -> only C,D remain",
+        "3. Duplicate provider match -> no duplicate row created",
+        "4. Repeated sync -> remains exactly 2 matches",
+        "5. Newer match replaces oldest match in DB",
+        "6. Zero valid matches -> existing records remain unchanged",
+        "7. Transaction failure -> previous records remain unchanged (atomic rollback)",
+        "8. Final invariant count <= 2 strictly enforced",
+        "9. Provider results containing duplicates deduplicated before selection"
       ]
     },
     "test_backend": {
@@ -89,21 +79,12 @@
     }
   },
   "frontend_verification": {
-    "production_build": "PASSED (0 errors, 993ms)",
+    "production_build": "PASSED (0 errors, 3.11s)",
     "ui_locked": true,
     "theme": "Phase 8.2.1 light cricket broadcast theme preserved"
   },
   "smoke_test": {
-    "status": "PASSED",
-    "verified_endpoints": [
-      "GET /api/health (database_connected: true, database_type: sqlite/postgresql, model_loaded: true)",
-      "GET /api/matches (live discovery separation)",
-      "GET /api/demo/matches (legacy demo retained)",
-      "GET /api/demo/matches/demo-match-1 (11 scenarios)",
-      "POST /api/simulation (11 scenarios)",
-      "GET /api/recent/matches (reads from DB, count <= 2)",
-      "OPTIONS /api/matches (CORS preflight)"
-    ]
+    "status": "PASSED (7/7 endpoints verified)"
   },
   "security_audit": {
     "hardcoded_secrets_found": 0,

@@ -89,22 +89,63 @@ class MatchSyncManager:
             return self._db_session
         return SessionLocal()
 
-    def apply_two_match_retention(self, session) -> int:
+    @staticmethod
+    def _parse_date_to_datetime(d_val: Any) -> datetime:
+        """Parses a date or ISO string into a timezone-aware UTC datetime."""
+        if not d_val:
+            return datetime.min.replace(tzinfo=timezone.utc)
+        raw = str(d_val).strip()
+        if not raw:
+            return datetime.min.replace(tzinfo=timezone.utc)
+
+        for fmt in (
+            "%Y-%m-%dT%H:%M:%S",
+            "%Y-%m-%d %H:%M:%S",
+            "%Y-%m-%dT%H:%M:%SZ",
+            "%Y-%m-%d",
+        ):
+            try:
+                return datetime.strptime(raw, fmt).replace(tzinfo=timezone.utc)
+            except ValueError:
+                pass
+
+        try:
+            dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt
+        except Exception:
+            pass
+
+        return datetime.min.replace(tzinfo=timezone.utc)
+
+    def apply_two_match_retention(self, session, retain_ids: Optional[set] = None) -> int:
         """
         Enforces Phase 12.3 invariant: MAXIMUM 2 stored matches.
-        Orders stored matches by stored_at descending, match_date descending.
-        Retains the 2 newest matches and deletes all older matches within the transaction.
+        If retain_ids is provided, deletes all stored matches not in retain_ids.
+        Otherwise, orders stored matches by recency and deletes older matches beyond the top 2.
         Returns the count of deleted matches.
         """
-        all_stored = (
-            session.query(Match)
-            .order_by(Match.stored_at.desc(), Match.match_date.desc())
-            .all()
-        )
-        if len(all_stored) <= 2:
+        all_stored = session.query(Match).all()
+        if not all_stored:
             return 0
 
-        to_delete = all_stored[2:]
+        if retain_ids is not None:
+            to_delete = [m for m in all_stored if m.match_id not in retain_ids]
+        else:
+            if len(all_stored) <= 2:
+                return 0
+            sorted_stored = sorted(
+                all_stored,
+                key=lambda m: (
+                    self._parse_date_to_datetime(m.date_time or m.match_date),
+                    m.stored_at.replace(tzinfo=timezone.utc) if (m.stored_at and m.stored_at.tzinfo is None) else (m.stored_at or datetime.min.replace(tzinfo=timezone.utc)),
+                    m.match_id,
+                ),
+                reverse=True,
+            )
+            to_delete = sorted_stored[2:]
+
         deleted_count = 0
         for old_m in to_delete:
             logger.info(f"Two-match retention: deleting older match {old_m.match_id} ({old_m.name})")
@@ -137,7 +178,7 @@ class MatchSyncManager:
             "quota_events": 0,
         }
 
-        # 1. Query recent matches from API
+        # 1. Query Cricket Data API once
         try:
             logger.info(f"Querying Cricket Data API /matches (offset={offset})...")
             raw_matches = self.api_client.get_matches(offset=offset)
@@ -161,13 +202,14 @@ class MatchSyncManager:
         close_session = self._db_session is None
 
         try:
+            # 2. Filter strictly to completed T20/T20I matches
+            # 3. Deduplicate provider results by stable match_id
+            valid_provider_by_id: Dict[str, Dict[str, Any]] = {}
             for raw_m in raw_matches[:limit]:
-                # 2. Strict T20/T20I Filter
                 if not is_t20_match(raw_m):
                     continue
                 summary["t20_matches_count"] += 1
 
-                # 3. Identify completed matches
                 is_ended = bool(raw_m.get("matchEnded", False))
                 status_str = str(raw_m.get("status") or "").lower()
                 is_completed_by_status = any(
@@ -175,7 +217,6 @@ class MatchSyncManager:
                 )
 
                 if not (is_ended or is_completed_by_status):
-                    # In-progress or scheduled match, not completed
                     continue
                 summary["completed_matches_count"] += 1
 
@@ -183,123 +224,190 @@ class MatchSyncManager:
                 if not match_id:
                     continue
 
-                # Parse match metadata
-                match_name = str(raw_m.get("name") or "Unknown T20 Match").strip()
-                match_format = str(raw_m.get("matchType") or "t20").upper()
-                series_name = str(raw_m.get("series_name") or raw_m.get("series_id") or "").strip()
-                venue = str(raw_m.get("venue") or "").strip()
-                city = str(raw_m.get("city") or "").strip()
-                match_date = str(raw_m.get("date") or "").strip()
-                date_time = str(raw_m.get("dateTimeGMT") or raw_m.get("dateTime") or raw_m.get("date") or "").strip()
-                status = str(raw_m.get("status") or "").strip()
-                winner = str(raw_m.get("matchWinner") or "").strip()
+                if match_id not in valid_provider_by_id:
+                    valid_provider_by_id[match_id] = raw_m
 
-                teams = [str(t).strip() for t in raw_m.get("teams", []) if t]
-                team_1 = teams[0] if len(teams) > 0 else None
-                team_2 = teams[1] if len(teams) > 1 else None
+            # If zero valid matches discovered from provider:
+            # Existing database should remain unchanged.
+            if not valid_provider_by_id:
+                logger.info("Zero valid completed T20 matches discovered from provider. Database remains unchanged.")
+                summary["total_stored_matches"] = session.query(Match).count()
+                return summary
 
-                scores = raw_m.get("score", [])
-                innings_count = len(scores) if isinstance(scores, list) else 0
+            # Query existing matches from database
+            existing_db_matches = session.query(Match).all()
+            existing_by_id = {m.match_id: m for m in existing_db_matches}
 
-                # Check if ball-by-ball data is available from provider
-                bbb_enabled = bool(raw_m.get("bbbEnabled", False))
-                deliveries_list = raw_m.get("deliveries") or raw_m.get("bbb")
+            # 4. Sort valid matches by actual recency:
+            # - match_date DESC
+            # - stored_at DESC where applicable
+            candidates: Dict[str, Tuple[datetime, datetime, Optional[Dict[str, Any]], Optional[Match]]] = {}
 
-                if bbb_enabled and not deliveries_list:
-                    try:
-                        logger.info(f"Fetching ball-by-ball match detail for match {match_id}...")
-                        m_detail = self.api_client.get_match_info(match_id)
-                        summary["provider_api_calls"] += 1
-                        deliveries_list = m_detail.get("deliveries") or m_detail.get("bbb")
-                    except Exception as e:
-                        logger.warning(f"Failed to fetch detail for {match_id}: {e}")
-
-                has_bbb = bool(deliveries_list and isinstance(deliveries_list, list) and len(deliveries_list) > 0)
-
-                # 4. Check if match already exists in database (Deduplication)
-                existing_match = session.query(Match).filter_by(match_id=match_id).first()
-                if existing_match:
-                    existing_match.status = status or existing_match.status
-                    existing_match.winner = winner or existing_match.winner
-                    existing_match.result_text = status or existing_match.result_text
-                    existing_match.updated_at = datetime.now(timezone.utc)
-                    if not existing_match.analysis_available and has_bbb:
-                        deliv_count, state_count = self._process_ball_by_ball(
-                            session=session,
-                            match_record=existing_match,
-                            deliveries_data=deliveries_list,
-                            raw_scores=scores,
-                        )
-                        if state_count > 0:
-                            existing_match.analysis_available = True
-                            summary["analysis_available_count"] += 1
-                            summary["deliveries_stored"] += deliv_count
-                            summary["states_stored"] += state_count
-                    summary["duplicate_matches_count"] += 1
-                    summary["matches_skipped"] += 1
-                    deleted = self.apply_two_match_retention(session)
-                    summary["deleted_old_matches"] += deleted
-                    session.commit()
-                    continue
-
-                # 5. Process new completed match
-                match_record = Match(
-                    match_id=match_id,
-                    name=match_name,
-                    format=match_format,
-                    series_name=series_name or None,
-                    venue=venue or None,
-                    city=city or None,
-                    match_date=match_date or None,
-                    date_time=date_time or None,
-                    completed_at=date_time or match_date or None,
-                    status=status or None,
-                    winner=winner or None,
-                    result_text=status or None,
-                    team_1=team_1,
-                    team_2=team_2,
-                    source="cricket_api",
-                    source_updated_at=datetime.now(timezone.utc),
-                    stored_at=datetime.now(timezone.utc),
-                    updated_at=datetime.now(timezone.utc),
-                    analysis_available=False,
-                    innings_count=innings_count,
+            for match_id, raw_m in valid_provider_by_id.items():
+                m_dt = self._parse_date_to_datetime(
+                    raw_m.get("dateTimeGMT") or raw_m.get("dateTime") or raw_m.get("date")
                 )
-                session.add(match_record)
-
-                if has_bbb:
-                    deliv_count, state_count = self._process_ball_by_ball(
-                        session=session,
-                        match_record=match_record,
-                        deliveries_data=deliveries_list,
-                        raw_scores=scores,
-                    )
-                    if state_count > 0:
-                        match_record.analysis_available = True
-                        summary["analysis_available_count"] += 1
-                        summary["deliveries_stored"] += deliv_count
-                        summary["states_stored"] += state_count
-                    else:
-                        summary["analysis_unavailable_count"] += 1
+                existing = existing_by_id.get(match_id)
+                if existing and existing.stored_at:
+                    s_at = existing.stored_at
                 else:
-                    summary["analysis_unavailable_count"] += 1
+                    s_at = datetime.now(timezone.utc)
+                if s_at.tzinfo is None:
+                    s_at = s_at.replace(tzinfo=timezone.utc)
+                candidates[match_id] = (m_dt, s_at, raw_m, existing)
 
-                # Enforce two-match retention transactionally
-                deleted = self.apply_two_match_retention(session)
-                summary["deleted_old_matches"] += deleted
+            for match_id, db_m in existing_by_id.items():
+                if match_id not in candidates:
+                    m_dt = self._parse_date_to_datetime(db_m.date_time or db_m.match_date)
+                    s_at = db_m.stored_at if db_m.stored_at else datetime.min.replace(tzinfo=timezone.utc)
+                    if s_at.tzinfo is None:
+                        s_at = s_at.replace(tzinfo=timezone.utc)
+                    candidates[match_id] = (m_dt, s_at, None, db_m)
 
-                session.commit()
-                summary["matches_stored"] += 1
-                logger.info(
-                    f"Stored match: {match_name} (analysis_available={match_record.analysis_available})"
+            sorted_candidates = sorted(
+                candidates.items(),
+                key=lambda item: (item[1][0], item[1][1], item[0]),
+                reverse=True,
+            )
+
+            # 5. Select the newest 2 valid matches
+            selected_candidates = sorted_candidates[:2]
+            selected_ids = {item[0] for item in selected_candidates}
+
+            # 6. Begin ONE database transaction
+            # (session is already bound to a transaction in SQLAlchemy)
+
+            # 7. Upsert/update ONLY those selected newest 2 matches
+            for match_id, (m_dt, s_at, raw_m, existing_record) in selected_candidates:
+                if raw_m is not None:
+                    match_name = str(raw_m.get("name") or "Unknown T20 Match").strip()
+                    match_format = str(raw_m.get("matchType") or "t20").upper()
+                    series_name = str(raw_m.get("series_name") or raw_m.get("series_id") or "").strip()
+                    venue = str(raw_m.get("venue") or "").strip()
+                    city = str(raw_m.get("city") or "").strip()
+                    match_date = str(raw_m.get("date") or "").strip()
+                    date_time = str(raw_m.get("dateTimeGMT") or raw_m.get("dateTime") or raw_m.get("date") or "").strip()
+                    status = str(raw_m.get("status") or "").strip()
+                    winner = str(raw_m.get("matchWinner") or "").strip()
+
+                    teams = [str(t).strip() for t in raw_m.get("teams", []) if t]
+                    team_1 = teams[0] if len(teams) > 0 else None
+                    team_2 = teams[1] if len(teams) > 1 else None
+
+                    scores = raw_m.get("score", [])
+                    innings_count = len(scores) if isinstance(scores, list) else 0
+
+                    bbb_enabled = bool(raw_m.get("bbbEnabled", False))
+                    deliveries_list = raw_m.get("deliveries") or raw_m.get("bbb")
+
+                    if bbb_enabled and not deliveries_list:
+                        try:
+                            logger.info(f"Fetching ball-by-ball match detail for match {match_id}...")
+                            m_detail = self.api_client.get_match_info(match_id)
+                            summary["provider_api_calls"] += 1
+                            deliveries_list = m_detail.get("deliveries") or m_detail.get("bbb")
+                        except Exception as e:
+                            logger.warning(f"Failed to fetch detail for {match_id}: {e}")
+
+                    has_bbb = bool(deliveries_list and isinstance(deliveries_list, list) and len(deliveries_list) > 0)
+
+                    if existing_record is not None:
+                        # Existing match update
+                        existing_record.status = status or existing_record.status
+                        existing_record.winner = winner or existing_record.winner
+                        existing_record.result_text = status or existing_record.result_text
+                        existing_record.updated_at = datetime.now(timezone.utc)
+                        if not existing_record.analysis_available and has_bbb:
+                            deliv_count, state_count = self._process_ball_by_ball(
+                                session=session,
+                                match_record=existing_record,
+                                deliveries_data=deliveries_list,
+                                raw_scores=scores,
+                            )
+                            if state_count > 0:
+                                existing_record.analysis_available = True
+                                summary["analysis_available_count"] += 1
+                                summary["deliveries_stored"] += deliv_count
+                                summary["states_stored"] += state_count
+                        summary["duplicate_matches_count"] += 1
+                        summary["matches_skipped"] += 1
+                    else:
+                        # New match insert
+                        match_record = Match(
+                            match_id=match_id,
+                            name=match_name,
+                            format=match_format,
+                            series_name=series_name or None,
+                            venue=venue or None,
+                            city=city or None,
+                            match_date=match_date or None,
+                            date_time=date_time or None,
+                            completed_at=date_time or match_date or None,
+                            status=status or None,
+                            winner=winner or None,
+                            result_text=status or None,
+                            team_1=team_1,
+                            team_2=team_2,
+                            source="cricket_api",
+                            source_updated_at=datetime.now(timezone.utc),
+                            stored_at=datetime.now(timezone.utc),
+                            updated_at=datetime.now(timezone.utc),
+                            analysis_available=False,
+                            innings_count=innings_count,
+                        )
+                        session.add(match_record)
+
+                        if has_bbb:
+                            deliv_count, state_count = self._process_ball_by_ball(
+                                session=session,
+                                match_record=match_record,
+                                deliveries_data=deliveries_list,
+                                raw_scores=scores,
+                            )
+                            if state_count > 0:
+                                match_record.analysis_available = True
+                                summary["analysis_available_count"] += 1
+                                summary["deliveries_stored"] += deliv_count
+                                summary["states_stored"] += state_count
+                            else:
+                                summary["analysis_unavailable_count"] += 1
+                        else:
+                            summary["analysis_unavailable_count"] += 1
+
+                        summary["matches_stored"] += 1
+                        logger.info(
+                            f"Stored match: {match_name} (analysis_available={match_record.analysis_available})"
+                        )
+                else:
+                    # Match was already in DB and remains selected as one of the 2 newest
+                    pass
+
+            # 8. Delete every stored Match whose match_id is NOT in the selected newest 2
+            to_delete = session.query(Match).filter(~Match.match_id.in_(selected_ids)).all()
+            for old_m in to_delete:
+                logger.info(f"Two-match retention: deleting older match {old_m.match_id} ({old_m.name})")
+                session.delete(old_m)
+                summary["deleted_old_matches"] += 1
+
+            # 9. Commit once
+            session.commit()
+
+            # 11. At the end, query the database again and verify count <= 2
+            final_count = session.query(Match).count()
+            summary["total_stored_matches"] = final_count
+
+            # 12. If count > 2, raise an error rather than silently reporting success
+            if final_count > 2:
+                raise RuntimeError(
+                    f"Retention invariant violation: database has {final_count} stored matches (maximum 2 allowed)."
                 )
-
-            summary["total_stored_matches"] = session.query(Match).count()
 
         except Exception as e:
             session.rollback()
             logger.error(f"Error during database ingestion: {e}")
             summary["errors"].append(str(e))
+            if "Retention invariant violation" in str(e):
+                raise
         finally:
             if close_session:
                 session.close()

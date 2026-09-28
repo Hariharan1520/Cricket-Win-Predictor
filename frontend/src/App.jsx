@@ -12,6 +12,8 @@ import NoLiveMatchState from './components/NoLiveMatchState';
 import {
   fetchLiveMatches,
   fetchMatchDetail,
+  fetchRecentMatches,
+  fetchRecentMatchDetail,
   fetchDemoMatches,
   fetchDemoMatchDetail,
   fetchHealth,
@@ -21,9 +23,9 @@ import { ShieldCheck, AlertCircle } from 'lucide-react';
 const DEFAULT_POLL_INTERVAL = 30; // seconds
 
 export default function App() {
-  const [activeMode, setActiveMode] = useState('live'); // 'live' | 'demo'
+  const [activeMode, setActiveMode] = useState('live'); // 'live' | 'recent'
   const [liveMatches, setLiveMatches] = useState([]);
-  const [demoMatches, setDemoMatches] = useState([]);
+  const [recentMatches, setRecentMatches] = useState([]);
   const [selectedMatchId, setSelectedMatchId] = useState(null);
   const [selectedMatch, setSelectedMatch] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -67,18 +69,35 @@ export default function App() {
           setSelectedMatch(null);
         }
       } else {
-        // Demo mode
-        const data = await fetchDemoMatches();
-        const matches = data.matches || [];
-        setDemoMatches(matches);
+        // Recent matches mode (backed by persistent DB)
+        let matches = [];
+        try {
+          const data = await fetchRecentMatches();
+          matches = data.matches || [];
+        } catch (e) {
+          console.warn('Recent matches endpoint failed, attempting fallback to demo matches:', e);
+        }
+
+        if (matches.length === 0) {
+          // Fallback to demo matches if database has not yet been populated
+          const demoData = await fetchDemoMatches();
+          matches = demoData.matches || [];
+        }
+
+        setRecentMatches(matches);
 
         const nextId = matches.some((m) => m.match_id === selectedMatchId)
           ? selectedMatchId
           : matches[0]?.match_id;
         setSelectedMatchId(nextId);
         if (nextId) {
-          const detail = await fetchDemoMatchDetail(nextId);
-          setSelectedMatch(detail);
+          try {
+            const detail = await fetchRecentMatchDetail(nextId);
+            setSelectedMatch(detail);
+          } catch (e) {
+            const demoDetail = await fetchDemoMatchDetail(nextId);
+            setSelectedMatch(demoDetail);
+          }
         }
       }
     } catch (err) {
@@ -100,8 +119,13 @@ export default function App() {
         const detail = await fetchMatchDetail(matchId);
         setSelectedMatch(detail);
       } else {
-        const detail = await fetchDemoMatchDetail(matchId);
-        setSelectedMatch(detail);
+        try {
+          const detail = await fetchRecentMatchDetail(matchId);
+          setSelectedMatch(detail);
+        } catch (e) {
+          const demoDetail = await fetchDemoMatchDetail(matchId);
+          setSelectedMatch(demoDetail);
+        }
       }
     } catch (err) {
       console.error('Error fetching match detail:', err);
@@ -139,16 +163,16 @@ export default function App() {
     }
   };
 
-  const currentMatchesList = activeMode === 'live' ? liveMatches : demoMatches;
+  const currentMatchesList = activeMode === 'live' ? liveMatches : recentMatches;
   const isCurrentlyLive = activeMode === 'live' && liveMatches.length > 0;
-  const isDemo = activeMode === 'demo';
+  const isRecent = activeMode === 'recent' || activeMode === 'demo';
 
   return (
     <div className="min-h-screen bg-[#F5F8FB] text-[#172B4D] flex flex-col font-sans selection:bg-[#0B9F72] selection:text-white">
       {/* Top Horizontal Header */}
       <Header
         isLive={isCurrentlyLive}
-        isDemo={isDemo}
+        isDemo={isRecent}
         onRefresh={() => loadMatches(false)}
         isRefreshing={isRefreshing}
         activeMode={activeMode}
@@ -161,14 +185,14 @@ export default function App() {
         onNavClick={handleNavClick}
       />
 
-      {/* Horizontal Live Match Strip */}
+      {/* Horizontal Live / Recent Match Strip */}
       {currentMatchesList.length > 0 && (
         <MatchSelector
           matches={currentMatchesList}
           selectedMatchId={selectedMatchId}
           onSelectMatch={handleSelectMatch}
-          title={activeMode === 'live' ? 'Live Matches' : 'Demo Matches'}
-          isDemo={isDemo}
+          title={activeMode === 'live' ? 'Live Matches' : 'Recent Matches'}
+          isDemo={isRecent}
         />
       )}
 
@@ -182,20 +206,20 @@ export default function App() {
           </div>
         )}
 
-        {/* Refined Pale Demo Mode Banner (Section 5) */}
-        {isDemo && (
-          <div className="mb-5 px-3.5 py-2 rounded-xl bg-[#F7F5F0] border border-[#E8E4DC] text-[#6B6355] text-xs flex items-center justify-between gap-3 shadow-2xs">
+        {/* Refined Persistent Recent Match Archive Banner */}
+        {isRecent && (
+          <div className="mb-5 px-3.5 py-2 rounded-xl bg-[#F0F4F8] border border-[#D9E2EC] text-[#334E68] text-xs flex items-center justify-between gap-3 shadow-2xs">
             <div className="flex items-center gap-2 text-xs">
-              <span className="px-1.5 py-0.5 rounded text-[10px] font-bold uppercase bg-[#E8E4DC] text-[#4A4438] tracking-wider">
-                DEMO MATCH
+              <span className="px-1.5 py-0.5 rounded text-[10px] font-bold uppercase bg-[#D9E2EC] text-[#102A43] tracking-wider">
+                RECENT MATCH REPLAY
               </span>
               <span>
-                Historical calibrated T20 state for simulation and predictive analysis.
+                Persistent PostgreSQL archive · Ball-by-ball win-probability trajectory & swings.
               </span>
             </div>
             <button
               onClick={() => setActiveMode('live')}
-              className="px-2.5 py-1 bg-white hover:bg-[#EFECE5] text-[#4A4438] border border-[#D8D2C5] rounded text-[11px] font-bold uppercase transition flex-shrink-0 shadow-2xs"
+              className="px-2.5 py-1 bg-white hover:bg-[#F5F8FB] text-[#102A43] border border-[#CBD2D9] rounded text-[11px] font-bold uppercase transition flex-shrink-0 shadow-2xs"
             >
               Switch to Live API
             </button>
@@ -205,7 +229,8 @@ export default function App() {
         {/* Live Mode & No T20 Available */}
         {activeMode === 'live' && liveMatches.length === 0 && !isLoading && (
           <NoLiveMatchState
-            onSwitchToDemo={() => setActiveMode('demo')}
+            onSwitchToRecent={() => setActiveMode('recent')}
+            onSwitchToDemo={() => setActiveMode('recent')}
             onRefresh={() => loadMatches(false)}
             isRefreshing={isRefreshing}
           />
@@ -252,18 +277,21 @@ export default function App() {
           </div>
         )}
 
-        {/* Unavailable Match State (e.g. non-T20 or 1st innings) */}
+        {/* Unavailable Match State (e.g. non-T20, 1st innings, or provider without ball-by-ball) */}
         {selectedMatch && !selectedMatch.available && (
           <div className="p-8 rounded-2xl bg-white border border-[#E3EAF0] text-center max-w-xl mx-auto my-12 shadow-xs">
             <h3 className="text-base font-bold text-[#172B4D] mb-1.5">
-              {selectedMatch.match?.name || 'Selected Match'}
+              {selectedMatch.match_name || selectedMatch.match?.name || 'Selected Match'}
             </h3>
             <p className="text-xs text-[#667085] mb-4">
-              {selectedMatch.reason || 'Live prediction unavailable for this match state.'}
+              {selectedMatch.reason || 'Historical probability replay unavailable for this match because ball-by-ball data was not provided by the data source.'}
             </p>
-            <span className="text-xs px-3 py-1 bg-[#F5F8FB] text-[#667085] rounded-full border border-[#E3EAF0]">
-              Status: {selectedMatch.match?.status || 'In Progress'}
-            </span>
+            <div className="inline-flex items-center gap-2 text-xs px-3 py-1 bg-[#F5F8FB] text-[#667085] rounded-full border border-[#E3EAF0]">
+              <span>Status: {selectedMatch.status || selectedMatch.match?.status || 'In Progress'}</span>
+              {(selectedMatch.venue || selectedMatch.match?.venue) && (
+                <span>· {selectedMatch.venue || selectedMatch.match?.venue}</span>
+              )}
+            </div>
           </div>
         )}
       </main>

@@ -1,0 +1,66 @@
+{
+  "phase": "12",
+  "name": "Persistent Recent T20 Match Storage & Historical Replay",
+  "status": "PERSISTENT_RECENT_MATCHES_READY",
+  "generated_at": "2026-09-28T04:45:00Z",
+  "database": {
+    "engine": "SQLAlchemy 2.0",
+    "driver": "psycopg v3 (psycopg[binary] 3.3.6)",
+    "driver_policy": "Strictly avoiding psycopg2-binary; using pure modern psycopg v3",
+    "database_url_normalization": "Auto-rewrites postgres:// and postgresql:// to postgresql+psycopg://",
+    "fallback": "SQLite (data/recent_matches.db) for zero-configuration local development",
+    "tables": [
+      {
+        "name": "matches",
+        "description": "Completed T20/T20I match metadata, teams, venue, series, winner, status, analysis_available flag",
+        "primary_key": "match_id"
+      },
+      {
+        "name": "deliveries",
+        "description": "Ball-by-ball delivery event stream with batter, bowler, runs, extras, and wickets",
+        "foreign_key": "matches.match_id",
+        "unique_constraint": "uq_match_delivery (match_id, innings, over_number, ball_number)"
+      },
+      {
+        "name": "match_states",
+        "description": "Exact 8 model feature vectors, evaluated win probability, and swing per legal ball",
+        "foreign_key": "matches.match_id",
+        "unique_constraint": "uq_match_state_ball (match_id, innings, legal_balls_completed)"
+      }
+    ]
+  },
+  "ingestion_and_sync": {
+    "cli_command": "python -m src.storage.match_sync --recent",
+    "t20_filter": "Strict (rejects Test, ODI, Hundred)",
+    "completed_filter": "Strict (rejects scheduled and ongoing fixtures)",
+    "deduplication": "Enforced; duplicate matches skipped without database error",
+    "zero_synthetic_data": "Preserved; real provider data only, zero fabricated deliveries",
+    "missing_bbb_policy": "When provider lacks ball-by-ball stream, scorecard metadata is stored with analysis_available=false",
+    "scoring_model": "Frozen Logistic Regression (models/logistic_regression_win_probability.joblib)",
+    "feature_vector": [
+      "target_score",
+      "current_score",
+      "wickets_lost",
+      "runs_remaining",
+      "balls_remaining",
+      "overs_completed",
+      "current_run_rate",
+      "required_run_rate"
+    ]
+  },
+  "api_isolation_verification": {
+    "frontend_endpoints": [
+      "GET /api/recent/matches",
+      "GET /api/recent/matches/<match_id>"
+    ],
+    "cricket_api_calls_during_user_navigation": 0,
+    "database_isolation_verified": true
+  },
+  "verification_summary": {
+    "total_automated_tests": 78,
+    "tests_passed": 78,
+    "tests_failed": 0,
+    "frontend_production_build": "Passed (dist/ built cleanly in 2.12s)",
+    "smoke_test_passed": true
+  }
+}

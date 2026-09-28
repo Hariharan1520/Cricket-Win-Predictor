@@ -874,3 +874,172 @@ Cricket Data API (https://api.cricapi.com/v1)
 - **Local Smoke Tests**: **6/6 endpoints verified** (`outputs/smoke_test.py`).
 - **Audit Report**: [`outputs/phase10_production_readiness_report.json`](outputs/phase10_production_readiness_report.json).
 
+---
+
+## 21. Phase 12: Persistent Recent T20 Match Storage & Historical Replay
+
+Phase 12 replaces ephemeral demo fixtures with a persistent **RECENT MATCHES** repository backed by PostgreSQL (with automatic zero-config SQLite fallback for local development).
+
+```
+Cricket Data API (https://api.cricapi.com/v1)
+               │
+               ▼ (Controlled sync CLI only: python -m src.storage.match_sync --recent)
+Persistent Database (PostgreSQL / SQLite fallback)
+├── matches table (metadata, status, venue, analysis_available flag)
+├── deliveries table (ball-by-ball event log: batter, bowler, runs, wickets)
+└── match_states table (exact 8 model features, evaluated win probability, swings)
+               │
+               ▼ (REST API: ZERO external API calls during user navigation)
+Flask Backend (`backend/app.py`)
+├── GET /api/recent/matches
+└── GET /api/recent/matches/<match_id>
+               │
+               ▼
+React 19 + Vite Dashboard (`frontend/`)
+├── Mode Switcher: LIVE | RECENT
+├── Match Strip: Displays stored recent matches & replay status
+├── Historical Replay: Full win-probability timeline & Leverage Swings
+└── What-If Simulator: Active on latest completed chase state
+```
+
+### 21.1 Strict Isolation Architecture
+> [!IMPORTANT]
+> **Zero External API Calls During User Navigation**: When a user browses recent fixtures or inspects a stored match, the frontend and Flask backend query PostgreSQL/SQLite **exclusively**. The Cricket Data API is touched strictly by the scheduled ingestion process (`MatchSyncManager`).
+
+### 21.2 Database Schema
+Uses **SQLAlchemy 2.0** with **psycopg v3** (`psycopg[binary] 3.3.6`).
+- **`matches`**:
+  - `match_id` (PK, String 128)
+  - `name`, `format`, `series_name`, `venue`, `city`, `match_date`, `status`, `winner`, `result_text`, `team_1`, `team_2`
+  - `analysis_available` (Boolean), `innings_count` (Integer), `stored_at` (DateTime)
+- **`deliveries`**:
+  - `id` (PK, Integer, autoincrement)
+  - `match_id` (FK `matches.match_id` ondelete CASCADE)
+  - `innings`, `over_number`, `ball_number`, `legal_ball_number`
+  - `batter`, `bowler`, `non_striker`, `runs_batter`, `runs_total`, `extras`, `wickets`
+  - Unique Constraint: `(match_id, innings, over_number, ball_number)`
+- **`match_states`**:
+  - `id` (PK, Integer, autoincrement)
+  - `match_id` (FK `matches.match_id` ondelete CASCADE)
+  - `innings`, `legal_balls_completed`, `overs_completed`
+  - Exact 8 Features: `target_score`, `current_score`, `wickets_lost`, `runs_remaining`, `balls_remaining`, `overs_completed`, `current_run_rate`, `required_run_rate`
+  - Evaluated Values: `win_probability`, `probability_swing`, `chasing_team_won`
+  - Unique Constraint: `(match_id, innings, legal_balls_completed)`
+
+### 21.3 Controlled Synchronization CLI
+```bash
+# Sync recent completed T20/T20I matches from provider into database
+python -m src.storage.match_sync --recent
+
+# Sync with custom limit and pagination offset
+python -m src.storage.match_sync --recent --limit 25 --offset 0
+```
+
+### 21.4 Real Match Ingestion & Handling Missing Ball-by-Ball
+- **Strict T20 Filtering**: Only T20/T20I matches are accepted; Test and ODI fixtures are rejected.
+- **Completed Matches Only**: Scheduled and ongoing matches are filtered out during recent match sync.
+- **Deduplication**: Matches already stored in the database are skipped without re-inserting or raising errors.
+- **Zero Synthetic Data Policy**: If a completed match does not have ball-by-ball coverage from the provider (`bbbEnabled: false`), its real match metadata is safely preserved and `analysis_available` is marked `false`. The frontend honestly displays *"Historical ball-by-ball probability replay is unavailable for this fixture"* without fabricating fake deliveries.
+
+### 21.5 Verification & Audit Summary
+- **Automated Tests**: **78/78 passing** (`python -m unittest discover tests`).
+  - Unit tests in `tests/test_storage.py`: **22/22 passing**.
+  - Unit tests in `tests/test_backend.py`: **18/18 passing**.
+  - Unit tests in `tests/test_live.py`: **38/38 passing**.
+- **Frontend Build**: **0 errors** (`cd frontend && npm run build`).
+- **End-to-End Smoke Test**: **7/7 endpoints verified** (`python outputs/smoke_test.py`).
+- **Audit Report**: [`outputs/phase12_storage_report.json`](outputs/phase12_storage_report.json).
+
+---
+
+## 22. Phase 12.3: Free Persistent Two-Match Storage with Neon PostgreSQL
+
+Phase 12.3 connects the production system to **Neon Serverless PostgreSQL** under a strict **Two-Match Retention Policy**, guaranteeing free persistent storage for completed real T20/T20I matches while preserving zero cost and total independence from Render's ephemeral filesystem.
+
+### 22.1 Why Neon PostgreSQL?
+- **True Free-Tier Persistence**: Neon provides 0.5 GB persistent cloud storage with zero time-based cost, persisting across Render web service restarts and redeployments.
+- **No Render Database Required**: Render PostgreSQL costs \$7/month and expires free instances after 30 days. Neon requires \$0 and never expires.
+- **No Render Persistent Disks**: Persistent disks on Render cost \$1/GB/month and are not available on free instances.
+- **Serverless Scaling**: Automatically scales to zero when idle and awakens on demand.
+
+### 22.2 Strict Two-Match Retention Rule
+To keep database usage minimal, predictable, and strictly within the free tier:
+- The database stores **at most 2 completed real T20/T20I matches** at any time.
+- Matches are ordered by ingestion/completion timestamp (`stored_at DESC, match_date DESC`).
+- When a 3rd match $C$ is ingested and matches $[A, B]$ exist, the oldest match $A$ is deleted transactionally along with its cascading child records in `deliveries` and `match_states`. Matches $[B, C]$ remain.
+- Deduplication: If a match is synced again, its metadata is updated without creating duplicate records or altering retention count.
+- Transactional atomicity: Ingestion and pruning execute within a single SQLAlchemy transaction (`session.commit()` or `session.rollback()`). If an error occurs, no data is pruned or lost.
+
+### 22.3 Neon Connection Handling & Serverless Pooling
+Neon suspends idle compute endpoints to conserve resources. To maintain seamless connectivity without stale connection exceptions:
+- **Connection Pre-ping**: `pool_pre_ping=True` verifies database liveness before executing queries.
+- **Connection Recycling**: `pool_recycle=300` refreshes connections every 5 minutes to gracefully handle Neon compute awakenings.
+- **URL Normalization**: Automatically converts `postgres://` or `postgresql://` connection strings to `postgresql+psycopg://` with query parameters (`sslmode=require`) preserved for modern SQLAlchemy 2.0 + psycopg v3 compatibility.
+- **Safe Fallback**: If `DATABASE_URL` is omitted, the engine automatically defaults to local SQLite (`data/recent_matches.db`).
+
+### 22.4 Connection String Configuration on Render
+In the Render Web Service Dashboard:
+1. Navigate to **Environment Variables**.
+2. Add:
+   ```env
+   DATABASE_URL=postgresql://<user>:<password>@<neon-hostname>.neon.tech/<dbname>?sslmode=require
+   ```
+3. Re-deploy the backend service. Verify connectivity via `GET /api/health`:
+   ```json
+   {
+     "status": "ok",
+     "project": "T20 Cricket Win Predictor",
+     "model_loaded": true,
+     "database_connected": true,
+     "database_type": "postgresql"
+   }
+   ```
+
+### 22.5 Syncing Real Matches via CLI
+```bash
+# Ingest recent real completed T20/T20I matches into Neon PostgreSQL
+python -m src.storage.match_sync --recent
+
+# Sync with custom limit and offset
+python -m src.storage.match_sync --recent --limit 20 --offset 0
+```
+Example Output:
+```text
+==================================================
+PHASE 12.3: NEON POSTGRESQL TWO-MATCH RECENT SYNC
+==================================================
+Target Database: postgresql (Neon Serverless)
+Matches inspected from provider: 18
+T20/T20I completed matches found: 2
+Matches inserted/updated: 2
+Older matches pruned (retention): 1
+Total stored matches in database: 2
+  1. api-12345 | India vs Australia, World T20 | 2026-09-25 | Analysis: AVAILABLE
+  2. api-67890 | Zimbabwe vs Namibia, T20I     | 2026-09-24 | Analysis: UNAVAILABLE
+Sync completed successfully in 1.42s.
+==================================================
+```
+
+### 22.6 Zero-API-Call Recent Match Browsing
+- User navigation on `/recent` triggers `GET /api/recent/matches` and `GET /api/recent/matches/<id>`.
+- The backend queries PostgreSQL / SQLite **only**.
+- Zero Cricket Data API calls or quota consumption occurs during browsing.
+- Live mode (`/live`) remains strictly separate and queries the external provider directly.
+
+### 22.7 Missing Ball-by-Ball Honest Fallback
+If the data provider does not provide ball-by-ball coverage (`bbbEnabled: false`):
+- Match metadata is safely persisted with `analysis_available = false`.
+- The system returns the exact honest disclaimer without synthetic data:
+  > *"Historical probability replay unavailable for this match because ball-by-ball data was not provided by the data source."*
+
+### 22.8 Phase 12.3 Verification & Test Results
+- **Automated Tests**: **84/84 passing** (`python -m unittest discover tests`).
+  - `tests/test_storage.py`: **28/28 passing** (including Section 16 mandatory retention test and tests A through T).
+  - `tests/test_backend.py`: **18/18 passing**.
+  - `tests/test_live.py`: **38/38 passing**.
+- **Frontend Build**: **0 errors** (`cd frontend && npm run build`).
+- **Smoke Test**: **7/7 endpoints verified** (`python outputs/smoke_test.py`).
+- **Audit Report**: [`outputs/phase12_3_neon_storage_report.json`](outputs/phase12_3_neon_storage_report.json).
+
+
+

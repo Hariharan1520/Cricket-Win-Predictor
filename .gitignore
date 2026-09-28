@@ -37,3 +37,9 @@ data/processed/*.csv
 models/random_forest_win_probability.joblib
 outputs/win_probability_swings.csv
 
+# Local SQLite databases
+*.db
+*.sqlite
+*.sqlite3
+data/*.db
+

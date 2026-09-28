@@ -1,0 +1,114 @@
+{
+  "phase": "12.3",
+  "name": "Free Persistent Two-Match Storage Using Neon PostgreSQL",
+  "status": "VALIDATED",
+  "timestamp": "2026-09-28T12:20:00+05:30",
+  "database": {
+    "provider": "Neon Serverless PostgreSQL",
+    "tier": "Free Tier (0.5 GB persistent cloud storage, $0 cost)",
+    "driver": "SQLAlchemy 2.0 with psycopg v3 (psycopg[binary] 3.3.6)",
+    "local_fallback": "SQLite (data/recent_matches.db)",
+    "connection_pooling": {
+      "pool_pre_ping": true,
+      "pool_recycle_seconds": 300,
+      "serverless_auto_reconnect": true
+    },
+    "url_normalization": {
+      "postgres_prefix_converted_to": "postgresql+psycopg://",
+      "sslmode_preserved": true
+    }
+  },
+  "retention_policy": {
+    "max_matches": 2,
+    "ordering": "stored_at DESC, match_date DESC",
+    "atomic_transaction": true,
+    "cascade_deletion": {
+      "deliveries": true,
+      "match_states": true
+    },
+    "deduplication": "Updates metadata in-place without duplicate rows",
+    "section_16_mandatory_test": "PASSED (Start [A, B] -> Insert C -> [B, C] -> Insert C -> [B, C] -> Insert D -> [C, D])"
+  },
+  "invariants": {
+    "zero_provider_calls_during_recent_browsing": true,
+    "live_mode_external_provider_separation": true,
+    "frozen_model": "models/logistic_regression_win_probability.joblib",
+    "exact_8_features": [
+      "target_score",
+      "current_score",
+      "wickets_lost",
+      "runs_remaining",
+      "balls_remaining",
+      "overs_completed",
+      "current_run_rate",
+      "required_run_rate"
+    ],
+    "no_synthetic_cricket_data": true,
+    "no_render_postgresql_cost": true,
+    "no_render_persistent_disk_cost": true,
+    "honest_fallback_message": "Historical probability replay unavailable for this match because ball-by-ball data was not provided by the data source."
+  },
+  "test_results": {
+    "total_automated_tests": 84,
+    "tests_passed": 84,
+    "tests_failed": 0,
+    "test_storage": {
+      "total": 28,
+      "passed": 28,
+      "tests_covered": [
+        "A. First match insertion",
+        "B. Second match insertion",
+        "C. Third match insertion deletes oldest",
+        "D. Duplicate match does not create another row",
+        "E. Only one match remains when only one valid match exists",
+        "F. Zero valid matches does not alter database",
+        "G. Failed synchronization rolls back",
+        "H. Recent API reads only from database",
+        "I. Recent API makes zero provider calls",
+        "J. LIVE still uses provider",
+        "K. T20 filtering remains strict",
+        "L. Non-T20 matches are rejected",
+        "M. Model still uses exact 8 features",
+        "N. Model artifact unchanged",
+        "O. analysis_available=false when ball-by-ball is unavailable",
+        "P. analysis_available=true when valid ball-by-ball data exists",
+        "Q. Maximum stored matches is always 2",
+        "R. PostgreSQL schema compiles cleanly",
+        "S. SQLite fallback still works",
+        "T. Database persistence survives separate sessions",
+        "Section 16: Mandatory retention cycle test (A,B -> C -> C -> D)"
+      ]
+    },
+    "test_backend": {
+      "total": 18,
+      "passed": 18
+    },
+    "test_live": {
+      "total": 38,
+      "passed": 38
+    }
+  },
+  "frontend_verification": {
+    "production_build": "PASSED (0 errors, 993ms)",
+    "ui_locked": true,
+    "theme": "Phase 8.2.1 light cricket broadcast theme preserved"
+  },
+  "smoke_test": {
+    "status": "PASSED",
+    "verified_endpoints": [
+      "GET /api/health (database_connected: true, database_type: sqlite/postgresql, model_loaded: true)",
+      "GET /api/matches (live discovery separation)",
+      "GET /api/demo/matches (legacy demo retained)",
+      "GET /api/demo/matches/demo-match-1 (11 scenarios)",
+      "POST /api/simulation (11 scenarios)",
+      "GET /api/recent/matches (reads from DB, count <= 2)",
+      "OPTIONS /api/matches (CORS preflight)"
+    ]
+  },
+  "security_audit": {
+    "hardcoded_secrets_found": 0,
+    "env_git_ignored": true,
+    "env_not_tracked": true,
+    "frontend_bundle_clean": true
+  }
+}

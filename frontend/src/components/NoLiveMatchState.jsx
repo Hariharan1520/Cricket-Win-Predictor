@@ -1,7 +1,7 @@
 import React from 'react';
 import { Radio, RefreshCw, Layers, ShieldCheck, Filter } from 'lucide-react';
 
-export default function NoLiveMatchState({ onSwitchToDemo, onRefresh, isRefreshing }) {
+export default function NoLiveMatchState({ onSwitchToRecent, onSwitchToDemo, onRefresh, isRefreshing }) {
   return (
     <div className="bg-white border border-[#E3EAF0] rounded-2xl p-8 sm:p-12 text-center max-w-2xl mx-auto my-8 shadow-xs">
       {/* Icon */}
@@ -38,11 +38,11 @@ export default function NoLiveMatchState({ onSwitchToDemo, onRefresh, isRefreshi
         </button>
 
         <button
-          onClick={onSwitchToDemo}
+          onClick={onSwitchToRecent || onSwitchToDemo}
           className="w-full sm:w-auto px-4 py-2 rounded-xl bg-[#0B9F72] hover:bg-[#168A5B] text-white text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 transition shadow-xs"
         >
           <Layers className="w-3.5 h-3.5" />
-          EXPLORE DEMO MATCHES
+          EXPLORE RECENT MATCHES
         </button>
       </div>
 

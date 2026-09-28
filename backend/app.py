@@ -55,6 +55,7 @@ from src.simulation.next_over_simulator import (
     BASELINE_SCENARIOS,
     simulate_next_over,
 )
+from backend.database import Delivery, Match, MatchState, check_db_connection, get_db_session
 
 logging.basicConfig(
     level=logging.INFO,
@@ -107,11 +108,14 @@ def get_api_client() -> Optional[CricketApiClient]:
 # ==========================================
 @app.route("/api/health", methods=["GET"])
 def health():
+    db_info = check_db_connection()
     return jsonify(
         {
             "status": "ok",
             "project": "T20 Cricket Win Predictor",
             "model_loaded": model is not None,
+            "database_connected": db_info.get("connected", False),
+            "database_type": db_info.get("type", "unknown"),
             "version": "1.0.0",
         }
     )
@@ -349,6 +353,228 @@ def run_simulation():
             "scenarios": scenarios_list,
         }
     )
+
+
+
+# ==========================================
+# 4.5. Persistent Recent Matches Endpoints (Phase 12)
+# STRICT INVARIANT: ZERO Cricket Data API calls.
+# Reads directly and exclusively from PostgreSQL / SQLite.
+# ==========================================
+@app.route("/api/recent/matches", methods=["GET"])
+def get_recent_matches():
+    """
+    Returns stored completed T20/T20I matches from persistent database (Neon PostgreSQL or SQLite).
+    STRICT REQUIREMENT: Does NOT call Cricket Data API.
+    Enforces Phase 12.3: returns at most the two most recent stored matches.
+    """
+    try:
+        for session in get_db_session():
+            matches = (
+                session.query(Match)
+                .order_by(Match.stored_at.desc(), Match.match_date.desc())
+                .limit(2)
+                .all()
+            )
+            result = []
+            for m in matches:
+                d = m.to_dict()
+                d["is_recent"] = True
+                d["is_live"] = False
+                result.append(d)
+
+            msg = (
+                f"Retrieved {len(result)} stored completed T20 matches."
+                if result
+                else "No stored recent matches found in database. Run sync first."
+            )
+            return jsonify(
+                {
+                    "matches": result,
+                    "count": len(result),
+                    "message": msg,
+                    "mode": "RECENT MATCHES",
+                    "is_live": False,
+                }
+            )
+    except Exception as e:
+        logger.error(f"Error querying recent matches from database: {e}")
+        return jsonify({"error": "Failed to query recent matches from database.", "matches": [], "count": 0}), 500
+
+
+@app.route("/api/recent/matches/<match_id>", methods=["GET"])
+def get_recent_match_detail(match_id: str):
+    """
+    Returns historical ball-by-ball analysis, win probability timeline, swings,
+    and simulation scenarios for a stored T20 match.
+    STRICT REQUIREMENT: Does NOT call Cricket Data API.
+    """
+    try:
+        for session in get_db_session():
+            m = session.query(Match).filter_by(match_id=match_id).first()
+            if not m:
+                return jsonify({"error": f"Recent match '{match_id}' not found in database."}), 404
+
+            m_dict = m.to_dict()
+
+            # If analysis is not available (e.g. provider had no ball-by-ball data)
+            if not m.analysis_available:
+                return jsonify(
+                    {
+                        "available": False,
+                        "analysis_available": False,
+                        "is_demo": False,
+                        "is_recent": True,
+                        "mode": "RECENT MATCHES",
+                        "match_id": m.match_id,
+                        "match_name": m.name,
+                        "format": m.format,
+                        "status": m.status,
+                        "venue": m.venue,
+                        "reason": "Historical probability replay unavailable for this match because ball-by-ball data was not provided by the data source.",
+                        "match": m_dict,
+                    }
+                )
+
+            # Fetch second-innings states
+            states = (
+                session.query(MatchState)
+                .filter_by(match_id=match_id, innings=2)
+                .order_by(MatchState.legal_balls_completed.asc())
+                .all()
+            )
+
+            if not states:
+                return jsonify(
+                    {
+                        "available": False,
+                        "is_demo": False,
+                        "is_recent": True,
+                        "mode": "RECENT MATCHES",
+                        "match_id": m.match_id,
+                        "match_name": m.name,
+                        "format": m.format,
+                        "status": m.status,
+                        "venue": m.venue,
+                        "reason": "No second-innings state progression found.",
+                        "match": m_dict,
+                    }
+                )
+
+            # Latest state
+            latest_state = states[-1]
+
+            # Build timeline: sample at over boundaries or every over + latest
+            timeline = []
+            overs_seen = set()
+            for st in states:
+                is_over_end = (st.legal_balls_completed % 6 == 0 and st.legal_balls_completed > 0)
+                is_last = (st == latest_state)
+                over_val = round(st.overs_completed, 1)
+
+                if (is_over_end and over_val not in overs_seen) or is_last:
+                    overs_seen.add(over_val)
+                    event_str = f"{over_val} ov: {int(st.current_score)}/{st.wickets_lost}"
+                    if st.balls_remaining > 0 and st.runs_remaining > 0:
+                        event_str += f" (Need {int(st.runs_remaining)} off {st.balls_remaining})"
+                    elif st.runs_remaining <= 0:
+                        event_str += " (Target reached)"
+                    elif st.wickets_lost >= 10:
+                        event_str += " (All out)"
+                    timeline.append(
+                        {
+                            "over": over_val,
+                            "win_prob": round(st.win_probability * 100, 1),
+                            "event": event_str,
+                        }
+                    )
+
+            # Build recent swings (significant probability changes)
+            swings_candidates = [s for s in states if abs(s.probability_swing) >= 0.01]
+            recent_swings = []
+            for s in swings_candidates[-5:]:
+                swing_pct = round(s.probability_swing * 100, 1)
+                swing_str = f"+{swing_pct}%" if swing_pct > 0 else f"{swing_pct}%"
+                swing_type = "positive" if swing_pct > 0 else "negative" if swing_pct < 0 else "neutral"
+                recent_swings.append(
+                    {
+                        "delivery": f"Over {s.overs_completed:.1f}",
+                        "event": f"{int(s.current_score)}/{s.wickets_lost} (Need {int(s.runs_remaining)})",
+                        "swing": swing_str,
+                        "type": swing_type,
+                    }
+                )
+
+            if not recent_swings:
+                recent_swings = [
+                    {
+                        "delivery": f"Over {latest_state.overs_completed:.1f}",
+                        "event": "Match Completion",
+                        "swing": f"{round(latest_state.probability_swing * 100, 1)}%",
+                        "type": "neutral",
+                    }
+                ]
+
+            # Run simulation for current state (using frozen Phase 6 simulation engine)
+            _, scenarios_df = simulate_next_over(
+                target_score=latest_state.target_score,
+                current_score=latest_state.current_score,
+                wickets_lost=latest_state.wickets_lost,
+                balls_remaining=latest_state.balls_remaining,
+                overs_completed=latest_state.overs_completed,
+                model=model,
+            )
+
+            overs_disp = f"{int(latest_state.legal_balls_completed // 6)}.{latest_state.legal_balls_completed % 6} ov ({latest_state.overs_completed:.2f} fractional)"
+
+            chasing_team = m.team_2 or "Team 2"
+            defending_team = m.team_1 or "Team 1"
+
+            return jsonify(
+                {
+                    "available": True,
+                    "is_demo": False,
+                    "is_recent": True,
+                    "mode": "RECENT MATCHES",
+                    "match_id": m.match_id,
+                    "match_name": m.name,
+                    "format": m.format,
+                    "status": m.status,
+                    "venue": m.venue,
+                    "chasing_team": chasing_team,
+                    "defending_team": defending_team,
+                    "current_score": latest_state.current_score,
+                    "wickets_lost": latest_state.wickets_lost,
+                    "overs_completed": latest_state.overs_completed,
+                    "overs_bowled_str": f"{int(latest_state.legal_balls_completed // 6)}.{latest_state.legal_balls_completed % 6}",
+                    "overs_display": overs_disp,
+                    "target_score": latest_state.target_score,
+                    "runs_remaining": latest_state.runs_remaining,
+                    "balls_remaining": latest_state.balls_remaining,
+                    "current_run_rate": latest_state.current_run_rate,
+                    "required_run_rate": latest_state.required_run_rate,
+                    "win_probability": latest_state.win_probability,
+                    "loss_probability": round(1.0 - latest_state.win_probability, 4),
+                    "win_probability_pct": round(latest_state.win_probability * 100, 1),
+                    "loss_probability_pct": round((1.0 - latest_state.win_probability) * 100, 1),
+                    "is_terminal": latest_state.runs_remaining <= 0 or latest_state.wickets_lost >= 10 or latest_state.balls_remaining <= 0,
+                    "terminal_state": (
+                        "CHASE_SUCCESS" if latest_state.runs_remaining <= 0
+                        else "ALL_OUT" if latest_state.wickets_lost >= 10
+                        else "BALLS_EXHAUSTED" if latest_state.balls_remaining <= 0
+                        else None
+                    ),
+                    "win_probability_change": latest_state.probability_swing,
+                    "absolute_probability_swing": abs(latest_state.probability_swing),
+                    "timeline": timeline,
+                    "recent_swings": recent_swings,
+                    "scenarios": scenarios_df.to_dict(orient="records"),
+                    "last_updated": m.stored_at.isoformat() if m.stored_at else datetime.now(timezone.utc).isoformat(),
+                }
+            )
+    except Exception as e:
+        logger.error(f"Error querying match {match_id} from database: {e}")
+        return jsonify({"error": f"Failed to retrieve match {match_id} from database."}), 500
 
 
 # ==========================================

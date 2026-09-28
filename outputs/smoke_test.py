@@ -96,7 +96,15 @@ def run_smoke_test():
     }
     if not sim_ok: all_passed = False
 
-    # 6. CORS Options Preflight Check
+    # 6. GET /api/recent/matches (Phase 12 Persistent Storage)
+    logger.info("Testing GET /api/recent/matches...")
+    resp = client.get("/api/recent/matches")
+    data = resp.get_json()
+    recent_ok = resp.status_code == 200 and data.get("mode") == "RECENT MATCHES" and "matches" in data
+    results["recent_matches"] = {"status_code": resp.status_code, "passed": recent_ok, "matches_count": len(data.get("matches", []))}
+    if not recent_ok: all_passed = False
+
+    # 7. CORS Options Preflight Check
     logger.info("Testing CORS preflight on /api/matches...")
     resp = client.options("/api/matches")
     cors_ok = resp.status_code == 200 and "Access-Control-Allow-Origin" in resp.headers

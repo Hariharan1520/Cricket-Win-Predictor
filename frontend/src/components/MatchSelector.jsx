@@ -27,11 +27,18 @@ export default function MatchSelector({
       };
     }
 
-    // Generic match fallback
     const teams = m.teams || (m.name ? m.name.split(' vs ') : ['Team A', 'Team B']);
     const teamA = (teams[0] || 'Team A').toUpperCase();
     const teamB = (teams[1] || 'Team B').toUpperCase();
     const format = m.format || 'T20';
+
+    if (m.is_recent) {
+      return {
+        teams: `${teamA} vs ${teamB}`,
+        liveMeta: `${format} · ${m.analysis_available ? 'REPLAY READY' : 'ARCHIVED'}`,
+        situation: m.status || (m.winner ? `${m.winner} won` : 'Completed'),
+      };
+    }
 
     return {
       teams: `${teamA} vs ${teamB}`,

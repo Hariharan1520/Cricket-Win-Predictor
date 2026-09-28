@@ -86,15 +86,15 @@ export default function Header({
               <span>LIVE</span>
             </button>
             <button
-              onClick={() => setActiveMode('demo')}
+              onClick={() => setActiveMode('recent')}
               className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-bold transition ${
-                activeMode === 'demo'
-                  ? 'bg-amber-600 text-white shadow-2xs'
+                activeMode === 'recent' || activeMode === 'demo'
+                  ? 'bg-[#186ADE] text-white shadow-2xs'
                   : 'text-[#667085] hover:text-[#172B4D]'
               }`}
             >
               <Layers className="w-3 h-3" />
-              <span>DEMO</span>
+              <span>RECENT</span>
             </button>
           </div>
 

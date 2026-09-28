@@ -24,6 +24,18 @@ export async function fetchMatchDetail(matchId) {
   return res.json();
 }
 
+export async function fetchRecentMatches() {
+  const res = await fetch(`${API_BASE}/recent/matches`);
+  if (!res.ok) throw new Error('Failed to fetch recent matches');
+  return res.json();
+}
+
+export async function fetchRecentMatchDetail(matchId) {
+  const res = await fetch(`${API_BASE}/recent/matches/${matchId}`);
+  if (!res.ok) throw new Error(`Failed to fetch recent match ${matchId}`);
+  return res.json();
+}
+
 export async function fetchDemoMatches() {
   const res = await fetch(`${API_BASE}/demo/matches`);
   if (!res.ok) throw new Error('Failed to fetch demo matches');
@@ -45,3 +57,4 @@ export async function runSimulation(stateParams) {
   if (!res.ok) throw new Error('Failed to execute next-over scenario simulation');
   return res.json();
 }
+

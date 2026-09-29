@@ -39,6 +39,10 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+# Strictly isolate unit tests to local test SQLite to protect production database
+TEST_DB_PATH = PROJECT_ROOT / "data" / "test_storage.db"
+os.environ["DATABASE_URL"] = f"sqlite:///{TEST_DB_PATH}"
+
 from sqlalchemy import create_engine, text
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.exc import IntegrityError
@@ -58,7 +62,12 @@ from backend.database import (
 from src.live.cricket_api import CricketApiClient, CricketApiRateLimitError
 from src.live.live_features import FEATURE_COLS
 from src.live.live_match import load_prediction_model
-from src.storage.match_sync import MatchSyncManager, parse_args
+from src.storage.match_sync import (
+    MatchSyncManager,
+    extract_match_winner,
+    extract_winner_from_result,
+    parse_args,
+)
 
 
 class TestDatabaseModels(unittest.TestCase):
@@ -835,6 +844,184 @@ class TestModelIntegrityAndConfiguration(unittest.TestCase):
             url = get_database_url()
             self.assertTrue(url.startswith("postgresql+psycopg://"))
             self.assertIn("sslmode=require", url)
+
+
+class TestWinnerExtractionAndMapping(unittest.TestCase):
+    """Regression tests for winner extraction and metadata mapping (Phase 12.3 bugfix)."""
+
+    def setUp(self):
+        self.engine = create_engine("sqlite:///:memory:", echo=False)
+        Base.metadata.create_all(bind=self.engine)
+        self.Session = sessionmaker(bind=self.engine)
+        self.session = self.Session()
+
+        self.mock_api = MagicMock(spec=CricketApiClient)
+        self.manager = MatchSyncManager(
+            api_client=self.mock_api,
+            db_session=self.session,
+        )
+
+    def tearDown(self):
+        self.session.close()
+        Base.metadata.drop_all(bind=self.engine)
+
+    def test_winner_extracted_from_wickets_margin(self):
+        """Scenario a: 'Luxembourg Women won by 4 wkts' -> winner = 'Luxembourg Women'."""
+        self.mock_api.get_matches.return_value = [
+            {
+                "id": "lux-bel-3",
+                "name": "Luxembourg Women vs Belgium Women, 3rd T20I, Belgium Women tour of Luxembourg, 2026",
+                "matchType": "t20",
+                "matchEnded": True,
+                "status": "Luxembourg Women won by 4 wkts",
+                "teams": ["Luxembourg Women", "Belgium Women"],
+                "date": "2026-09-28",
+            }
+        ]
+        summary = self.manager.sync_recent_matches()
+        self.assertEqual(summary["matches_stored"], 1)
+
+        m = self.session.query(Match).filter_by(match_id="lux-bel-3").first()
+        self.assertIsNotNone(m)
+        self.assertEqual(m.winner, "Luxembourg Women")
+        self.assertEqual(m.status, "Luxembourg Women won by 4 wkts")
+        self.assertEqual(m.result_text, "Luxembourg Women won by 4 wkts")
+
+        # Verify JSON dictionary serialization
+        d = m.to_dict()
+        self.assertEqual(d["winner"], "Luxembourg Women")
+        self.assertEqual(d["result"], "Luxembourg Women won by 4 wkts")
+
+    def test_winner_extracted_from_runs_margin(self):
+        """Scenario b: 'Luxembourg Women won by 47 runs' -> winner = 'Luxembourg Women'."""
+        self.mock_api.get_matches.return_value = [
+            {
+                "id": "lux-bel-4",
+                "name": "Luxembourg Women vs Belgium Women, 4th T20I, Belgium Women tour of Luxembourg, 2026",
+                "matchType": "t20",
+                "matchEnded": True,
+                "status": "Luxembourg Women won by 47 runs",
+                "teams": ["Luxembourg Women", "Belgium Women"],
+                "date": "2026-09-28",
+            }
+        ]
+        summary = self.manager.sync_recent_matches()
+        self.assertEqual(summary["matches_stored"], 1)
+
+        m = self.session.query(Match).filter_by(match_id="lux-bel-4").first()
+        self.assertIsNotNone(m)
+        self.assertEqual(m.winner, "Luxembourg Women")
+        self.assertEqual(m.status, "Luxembourg Women won by 47 runs")
+
+        d = m.to_dict()
+        self.assertEqual(d["winner"], "Luxembourg Women")
+        self.assertEqual(d["result"], "Luxembourg Women won by 47 runs")
+
+    def test_winner_cannot_safely_be_determined_remains_null(self):
+        """Scenario c: Undetermined results ('Match tied', 'Match abandoned', 'No result') -> winner remains NULL."""
+        undetermined_statuses = [
+            ("tie-1", "Match tied", "2026-09-20"),
+            ("aban-2", "Match abandoned without a ball bowled", "2026-09-21"),
+            ("nr-3", "No result", "2026-09-22"),
+        ]
+        for m_id, status_val, d_val in undetermined_statuses:
+            self.mock_api.get_matches.return_value = [
+                {
+                    "id": m_id,
+                    "name": f"Match {m_id}",
+                    "matchType": "t20",
+                    "matchEnded": True,
+                    "status": status_val,
+                    "teams": ["Team A", "Team B"],
+                    "date": d_val,
+                }
+            ]
+            self.manager.sync_recent_matches()
+            m = self.session.query(Match).filter_by(match_id=m_id).first()
+            if m:
+                self.assertIsNone(m.winner, f"Expected None for status '{status_val}', got '{m.winner}'")
+                d = m.to_dict()
+                self.assertIsNone(d["winner"])
+
+    def test_already_stored_match_with_null_winner_updated_by_sync(self):
+        """Scenario d: An already-stored match with winner=NULL is updated to correctly parsed winner upon sync."""
+        # Pre-seed database with a match having winner=None
+        pre_match = Match(
+            match_id="lux-stored-null",
+            name="Luxembourg Women vs Belgium Women, 3rd T20I, Belgium Women tour of Luxembourg, 2026",
+            format="T20",
+            venue="Pierre Werner Cricket Ground, Walferdange",
+            match_date="2026-09-28",
+            status="Luxembourg Women won by 4 wkts",
+            winner=None,  # Stored as NULL previously
+            result_text="Luxembourg Women won by 4 wkts",
+            team_1="Luxembourg Women",
+            team_2="Belgium Women",
+            stored_at=datetime(2026, 9, 28, 12, 0, tzinfo=timezone.utc),
+        )
+        self.session.add(pre_match)
+        self.session.commit()
+
+        # Confirm initial state is NULL
+        initial = self.session.query(Match).filter_by(match_id="lux-stored-null").first()
+        self.assertIsNone(initial.winner)
+        self.assertIsNone(initial.to_dict()["winner"])
+
+        # Run normal sync where provider returns match update
+        self.mock_api.get_matches.return_value = [
+            {
+                "id": "lux-stored-null",
+                "name": "Luxembourg Women vs Belgium Women, 3rd T20I, Belgium Women tour of Luxembourg, 2026",
+                "matchType": "t20",
+                "matchEnded": True,
+                "status": "Luxembourg Women won by 4 wkts",
+                "teams": ["Luxembourg Women", "Belgium Women"],
+                "date": "2026-09-28",
+            }
+        ]
+        summary = self.manager.sync_recent_matches()
+        self.assertEqual(summary["duplicate_matches_count"], 1)
+
+        # Verify winner changed from NULL to "Luxembourg Women"
+        updated = self.session.query(Match).filter_by(match_id="lux-stored-null").first()
+        self.assertEqual(updated.winner, "Luxembourg Women")
+        self.assertEqual(updated.to_dict()["winner"], "Luxembourg Women")
+        self.assertEqual(updated.to_dict()["result"], "Luxembourg Women won by 4 wkts")
+
+    def test_explicit_provider_winner_field_takes_precedence(self):
+        """Verify explicit matchWinner or winner field from provider is preserved."""
+        self.mock_api.get_matches.return_value = [
+            {
+                "id": "exp-winner-1",
+                "name": "Team Alpha vs Team Beta",
+                "matchType": "t20",
+                "matchEnded": True,
+                "matchWinner": "Team Alpha",
+                "status": "Team Alpha won by 15 runs",
+                "teams": ["Team Alpha", "Team Beta"],
+                "date": "2026-09-28",
+            }
+        ]
+        self.manager.sync_recent_matches()
+        m = self.session.query(Match).filter_by(match_id="exp-winner-1").first()
+        self.assertIsNotNone(m)
+        self.assertEqual(m.winner, "Team Alpha")
+
+    def test_direct_winner_parser_edge_cases(self):
+        """Direct unit test of extract_winner_from_result parser with diverse cricket outcomes."""
+        teams = ["Luxembourg Women", "Belgium Women"]
+        self.assertEqual(extract_winner_from_result("Luxembourg Women won by 4 wkts", teams), "Luxembourg Women")
+        self.assertEqual(extract_winner_from_result("Luxembourg Women won by 47 runs", teams), "Luxembourg Women")
+        self.assertEqual(extract_winner_from_result("India won by 6 wickets", ["India", "England"]), "India")
+        self.assertEqual(extract_winner_from_result("South Africa won by 1 run", ["South Africa", "Sri Lanka"]), "South Africa")
+        self.assertEqual(extract_winner_from_result("Match tied (Team A won the Super Over)", ["Team A", "Team B"]), "Team A")
+        self.assertEqual(extract_winner_from_result("England won by 5 wickets (DLS method)", ["England", "Australia"]), "England")
+        self.assertIsNone(extract_winner_from_result("Match tied", teams))
+        self.assertIsNone(extract_winner_from_result("Match abandoned without a ball bowled", teams))
+        self.assertIsNone(extract_winner_from_result("No result", teams))
+        self.assertIsNone(extract_winner_from_result("In progress", teams))
+        self.assertIsNone(extract_winner_from_result("", teams))
+        self.assertIsNone(extract_winner_from_result(None, teams))
 
 
 if __name__ == "__main__":

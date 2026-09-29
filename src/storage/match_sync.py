@@ -14,6 +14,7 @@ import argparse
 import json
 import logging
 import os
+import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -52,6 +53,76 @@ logger = logging.getLogger("match_sync")
 DEFAULT_MODEL_PATH = PROJECT_ROOT / "models" / "logistic_regression_win_probability.joblib"
 
 
+def extract_winner_from_result(status_str: Optional[str], teams: Optional[List[str]] = None) -> Optional[str]:
+    """
+    Derives the winning team name from a match result/status string.
+    E.g. 'Luxembourg Women won by 4 wkts' -> 'Luxembourg Women'
+         'Luxembourg Women won by 47 runs' -> 'Luxembourg Women'
+         'Match tied (Team A won the Super Over)' -> 'Team A'
+         'Match tied' -> None
+         'Match abandoned' -> None
+         'No result' -> None
+    """
+    if not status_str or not isinstance(status_str, str):
+        return None
+    s = status_str.strip()
+    if not s:
+        return None
+
+    s_lower = s.lower()
+    # Non-decisive or non-winner match conclusions
+    if any(k in s_lower for k in ["no result", "abandoned", "drawn", "cancelled", "rain stopped", "suspended"]):
+        return None
+    if "tied" in s_lower and "won" not in s_lower:
+        return None
+
+    candidate = None
+    # 1. Super Over / parenthesis decider: "Match tied (Team A won ...)"
+    paren_match = re.search(r"\(\s*([^\)]+?)\s+won\b", s, re.IGNORECASE)
+    if paren_match:
+        candidate = paren_match.group(1).strip()
+    else:
+        # 2. Standard pattern: "<Team Name> won ..."
+        m = re.match(r"^(.+?)\s+won(?:\s+by|\s+the|\s+on|\b)", s, re.IGNORECASE)
+        if m:
+            candidate = m.group(1).strip()
+
+    if not candidate or candidate.lower() in ["match", "the match", "no"]:
+        return None
+
+    # If known teams list provided, match casing and verify
+    if teams:
+        for t in teams:
+            t_str = str(t).strip()
+            if t_str and candidate.lower() == t_str.lower():
+                return t_str
+
+    return candidate
+
+
+def extract_match_winner(raw_m: Dict[str, Any], teams: Optional[List[str]] = None) -> Optional[str]:
+    """
+    Extracts or derives the winning team for a match.
+    1. Checks explicit provider fields: 'matchWinner' or 'winner'.
+    2. If missing or empty, derives it from the 'status' or 'result' string.
+    3. Returns None if winner cannot safely be determined.
+    """
+    # 1. Check explicit fields
+    for key in ("matchWinner", "winner"):
+        val = raw_m.get(key)
+        if val and str(val).strip():
+            explicit_str = str(val).strip()
+            if teams:
+                for t in teams:
+                    if explicit_str.lower() == str(t).strip().lower():
+                        return str(t).strip()
+            return explicit_str
+
+    # 2. Derive from status / result text
+    status_str = str(raw_m.get("status") or raw_m.get("result") or "").strip()
+    return extract_winner_from_result(status_str, teams)
+
+
 class MatchSyncManager:
     """
     Manages synchronization of completed T20 matches into persistent storage.
@@ -69,7 +140,16 @@ class MatchSyncManager:
         self.model = model
 
         # Ensure database tables exist
-        init_db()
+        target_eng = None
+        if self._db_session is not None:
+            try:
+                target_eng = self._db_session.get_bind()
+            except Exception:
+                pass
+        try:
+            init_db(target_engine=target_eng)
+        except Exception as e:
+            logger.warning(f"Database initialization note: {e}")
 
         if self.model is None and DEFAULT_MODEL_PATH.exists():
             try:
@@ -288,11 +368,14 @@ class MatchSyncManager:
                     match_date = str(raw_m.get("date") or "").strip()
                     date_time = str(raw_m.get("dateTimeGMT") or raw_m.get("dateTime") or raw_m.get("date") or "").strip()
                     status = str(raw_m.get("status") or "").strip()
-                    winner = str(raw_m.get("matchWinner") or "").strip()
 
                     teams = [str(t).strip() for t in raw_m.get("teams", []) if t]
-                    team_1 = teams[0] if len(teams) > 0 else None
-                    team_2 = teams[1] if len(teams) > 1 else None
+                    if not teams and existing_record is not None:
+                        teams = [t for t in [existing_record.team_1, existing_record.team_2] if t]
+                    team_1 = teams[0] if len(teams) > 0 else (existing_record.team_1 if existing_record else None)
+                    team_2 = teams[1] if len(teams) > 1 else (existing_record.team_2 if existing_record else None)
+
+                    winner = extract_match_winner(raw_m, teams=teams)
 
                     scores = raw_m.get("score", [])
                     innings_count = len(scores) if isinstance(scores, list) else 0
@@ -316,6 +399,8 @@ class MatchSyncManager:
                         existing_record.status = status or existing_record.status
                         existing_record.winner = winner or existing_record.winner
                         existing_record.result_text = status or existing_record.result_text
+                        existing_record.team_1 = team_1 or existing_record.team_1
+                        existing_record.team_2 = team_2 or existing_record.team_2
                         existing_record.updated_at = datetime.now(timezone.utc)
                         if not existing_record.analysis_available and has_bbb:
                             deliv_count, state_count = self._process_ball_by_ball(
@@ -344,7 +429,7 @@ class MatchSyncManager:
                             date_time=date_time or None,
                             completed_at=date_time or match_date or None,
                             status=status or None,
-                            winner=winner or None,
+                            winner=winner,
                             result_text=status or None,
                             team_1=team_1,
                             team_2=team_2,
@@ -380,7 +465,16 @@ class MatchSyncManager:
                         )
                 else:
                     # Match was already in DB and remains selected as one of the 2 newest
-                    pass
+                    # Backfill winner if missing and result_text/status exists
+                    if existing_record and not existing_record.winner:
+                        teams = [t for t in [existing_record.team_1, existing_record.team_2] if t]
+                        derived_winner = extract_winner_from_result(
+                            existing_record.result_text or existing_record.status or "",
+                            teams=teams,
+                        )
+                        if derived_winner:
+                            existing_record.winner = derived_winner
+                            existing_record.updated_at = datetime.now(timezone.utc)
 
             # 8. Delete every stored Match whose match_id is NOT in the selected newest 2
             to_delete = session.query(Match).filter(~Match.match_id.in_(selected_ids)).all()

@@ -4,6 +4,7 @@ import { ArrowRight, Check, HelpCircle } from 'lucide-react';
 export default function NextOverSimulator({
   scenarios,
   currentWinProbPct,
+  isRecent = false,
 }) {
   const [selectedIdx, setSelectedIdx] = useState(5); // Default to mid scenario (e.g. 6 or 8 runs)
   const [showAllScenarios, setShowAllScenarios] = useState(false);
@@ -26,10 +27,12 @@ export default function NextOverSimulator({
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
           <div>
             <h3 className="text-sm font-bold text-[#172B4D] tracking-tight m-0">
-              WHAT-IF NEXT-OVER SIMULATOR
+              WHAT-IF NEXT-OVER SIMULATION
             </h3>
             <p className="text-xs text-[#667085] m-0 mt-0.5">
-              Explore how different next-over outcomes could change predicted win probability.
+              {isRecent
+                ? 'Hypothetical next-over simulation from stored match state · Not an actual historical event.'
+                : 'Explore how different next-over outcomes could change predicted win probability.'}
             </p>
           </div>
 

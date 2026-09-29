@@ -44,6 +44,15 @@ export default function NoLiveMatchState({ onSwitchToRecent, onSwitchToDemo, onR
           <Layers className="w-3.5 h-3.5" />
           EXPLORE RECENT MATCHES
         </button>
+        {onSwitchToRecent && onSwitchToDemo && (
+          <button
+            onClick={onSwitchToDemo}
+            className="w-full sm:w-auto px-4 py-2 rounded-xl bg-[#667085] hover:bg-[#525D6B] text-white text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 transition shadow-xs"
+          >
+            <Layers className="w-3.5 h-3.5" />
+            TRY DEMO MATCH
+          </button>
+        )}
       </div>
 
       {/* Footer Info */}

@@ -50,8 +50,10 @@ function TeamEmblem({ teamName, isChasing = false }) {
   );
 }
 
-export default function MatchHeader({ match }) {
+export default function MatchHeader({ match, isRecent = false, isDemo = false }) {
   if (!match) return null;
+
+  const isHistorical = isRecent || match.is_recent;
 
   const {
     match_name,
@@ -107,7 +109,7 @@ export default function MatchHeader({ match }) {
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#E3EAF0] pb-3 mb-6 text-xs text-[#667085]">
         <div className="flex items-center gap-2">
           <span className="px-2 py-0.5 rounded text-[11px] font-bold uppercase bg-[#EAF8F2] text-[#0B9F72]">
-            {format} · SUPER 8
+            {format} · {isDemo ? 'DEMO / SIMULATION' : isHistorical ? 'HISTORICAL ARCHIVE' : 'LIVE'}
           </span>
           <span className="font-semibold text-[#172B4D]">{match_name}</span>
         </div>
@@ -189,11 +191,18 @@ export default function MatchHeader({ match }) {
         </div>
       </div>
 
-      {/* Terminal State Alert */}
-      {is_terminal && (
-        <div className="mt-5 pt-3 border-t border-[#E3EAF0] flex items-center gap-2 text-xs font-bold text-amber-800 bg-amber-50 p-2.5 rounded-xl border border-amber-200">
-          <Award className="w-4 h-4 text-amber-700 flex-shrink-0" />
-          <span>MATCH CONCLUDED: {terminal_state}</span>
+      {/* Match Outcome / Result Banner */}
+      {(is_terminal || isHistorical) && (
+        <div className="mt-5 pt-3 border-t border-[#E3EAF0] flex items-center justify-between gap-2 text-xs font-bold text-[#0B9F72] bg-[#EAF8F2] p-2.5 rounded-xl border border-[#0B9F72]/30">
+          <div className="flex items-center gap-2">
+            <Award className="w-4 h-4 text-[#0B9F72] flex-shrink-0" />
+            <span>{status || (match.winner ? `${match.winner} won` : 'Match Completed')}</span>
+          </div>
+          {isHistorical && (
+            <span className="text-[10px] font-mono uppercase tracking-wider text-[#0B9F72] bg-white px-2 py-0.5 rounded border border-[#0B9F72]/20">
+              Completed Match
+            </span>
+          )}
         </div>
       )}
     </div>

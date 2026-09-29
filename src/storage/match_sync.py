@@ -383,12 +383,32 @@ class MatchSyncManager:
                     bbb_enabled = bool(raw_m.get("bbbEnabled", False))
                     deliveries_list = raw_m.get("deliveries") or raw_m.get("bbb")
 
-                    if bbb_enabled and not deliveries_list:
+                    # Avoid redundant API calls if match already has historical analysis (Section 10)
+                    already_has_analysis = bool(existing_record and existing_record.analysis_available)
+
+                    if not already_has_analysis and not deliveries_list:
+                        # Attempt to fetch detailed match info / bbb from provider if available
                         try:
-                            logger.info(f"Fetching ball-by-ball match detail for match {match_id}...")
+                            logger.info(f"Checking provider details for completed match {match_id}...")
                             m_detail = self.api_client.get_match_info(match_id)
                             summary["provider_api_calls"] += 1
                             deliveries_list = m_detail.get("deliveries") or m_detail.get("bbb")
+                            if not scores and m_detail.get("score"):
+                                scores = m_detail.get("score")
+                                innings_count = len(scores) if isinstance(scores, list) else 0
+
+                            # If bbbEnabled and deliveries still not found, try get_match_bbb if available
+                            if not deliveries_list and (bbb_enabled or m_detail.get("bbbEnabled")):
+                                if hasattr(self.api_client, "get_match_bbb"):
+                                    try:
+                                        bbb_resp = self.api_client.get_match_bbb(match_id)
+                                        summary["provider_api_calls"] += 1
+                                        if isinstance(bbb_resp, list):
+                                            deliveries_list = bbb_resp
+                                        elif isinstance(bbb_resp, dict):
+                                            deliveries_list = bbb_resp.get("bbb") or bbb_resp.get("deliveries") or bbb_resp.get("data")
+                                    except Exception as bbb_err:
+                                        logger.debug(f"match_bbb endpoint note for {match_id}: {bbb_err}")
                         except Exception as e:
                             logger.warning(f"Failed to fetch detail for {match_id}: {e}")
 
@@ -402,7 +422,7 @@ class MatchSyncManager:
                         existing_record.team_1 = team_1 or existing_record.team_1
                         existing_record.team_2 = team_2 or existing_record.team_2
                         existing_record.updated_at = datetime.now(timezone.utc)
-                        if not existing_record.analysis_available and has_bbb:
+                        if has_bbb:
                             deliv_count, state_count = self._process_ball_by_ball(
                                 session=session,
                                 match_record=existing_record,
@@ -414,6 +434,15 @@ class MatchSyncManager:
                                 summary["analysis_available_count"] += 1
                                 summary["deliveries_stored"] += deliv_count
                                 summary["states_stored"] += state_count
+                            else:
+                                if not existing_record.analysis_available:
+                                    summary["analysis_unavailable_count"] += 1
+                        else:
+                            if existing_record.analysis_available:
+                                summary["analysis_available_count"] += 1
+                            else:
+                                summary["analysis_unavailable_count"] += 1
+
                         summary["duplicate_matches_count"] += 1
                         summary["matches_skipped"] += 1
                     else:
@@ -522,19 +551,68 @@ class MatchSyncManager:
         deliv_count = 0
         state_count = 0
 
+        # Clear existing deliveries and states on re-sync to prevent duplicate rows
+        session.query(MatchState).filter_by(match_id=match_record.match_id).delete()
+        session.query(Delivery).filter_by(match_id=match_record.match_id).delete()
+        session.flush()
+
+        # Deterministic sorting of deliveries: (innings, over, ball, sequence)
+        def _delivery_sort_key(d: Dict[str, Any]):
+            inn = int(d.get("inning", d.get("innings", 1)) or 1)
+            ov = int(d.get("over", d.get("over_number", 0)) or 0)
+            b = int(d.get("ball", d.get("ball_number", 1)) or 1)
+            seq = int(d.get("order", d.get("seq", d.get("delivery_order", 0))) or 0)
+            return (inn, ov, b, seq)
+
+        sorted_delivery_pairs = sorted(
+            enumerate(deliveries_data),
+            key=lambda item: (*_delivery_sort_key(item[1]), item[0]),
+        )
+        sorted_deliveries = [delivery for _, delivery in sorted_delivery_pairs]
+
         # Calculate target score from 1st innings if available
         target_score = 0.0
-        if raw_scores and len(raw_scores) >= 1:
-            inn1_runs = int(raw_scores[0].get("r", 0) or 0)
-            target_score = float(inn1_runs + 1)
+        if raw_scores and isinstance(raw_scores, list):
+            for sc in raw_scores:
+                inn_label = str(sc.get("inning") or "").lower()
+                if "1" in inn_label:
+                    r_val = sc.get("r") or sc.get("runs") or sc.get("score")
+                    if r_val is not None:
+                        target_score = float(int(r_val) + 1)
+                        break
+            if target_score <= 0.0 and len(raw_scores) >= 1:
+                r_val = raw_scores[0].get("r") or raw_scores[0].get("runs") or raw_scores[0].get("score")
+                if r_val is not None:
+                    target_score = float(int(r_val) + 1)
+
+        # Fallback: compute target score directly from innings 1 deliveries
+        if target_score <= 0.0:
+            inn1_delivs = [d for d in sorted_deliveries if int(d.get("inning", d.get("innings", 1)) or 1) == 1]
+            if inn1_delivs:
+                inn1_runs = sum(int(d.get("runs_total", d.get("runs", d.get("r", 0))) or 0) for d in inn1_delivs)
+                target_score = float(inn1_runs + 1)
 
         # Store deliveries
         deliveries_to_add = []
-        for d in deliveries_data:
+        delivery_by_source_index = {}
+        inn_order_counters = {}
+        seen_over_balls = set()
+        for source_index, d in sorted_delivery_pairs:
             inn = int(d.get("inning", d.get("innings", 1)) or 1)
             over_num = int(d.get("over", d.get("over_number", 0)) or 0)
             ball_num = int(d.get("ball", d.get("ball_number", 1)) or 1)
-            legal_ball = int(d.get("legal_ball_number", ball_num) or ball_num)
+            legal_ball = int(d.get("legal_ball_number", d.get("legal_ball", ball_num)) or ball_num)
+
+            # Prevent duplicate (innings, over, ball) collisions if provider raw data repeats ball number
+            while (inn, over_num, ball_num) in seen_over_balls:
+                ball_num += 1
+            seen_over_balls.add((inn, over_num, ball_num))
+
+            batting_team = str(d.get("batting_team", d.get("battingTeam", match_record.team_1 if inn == 1 else match_record.team_2)) or "").strip() or None
+            bowling_team = str(d.get("bowling_team", d.get("bowlingTeam", match_record.team_2 if inn == 1 else match_record.team_1)) or "").strip() or None
+            inn_order_counters[inn] = inn_order_counters.get(inn, 0) + 1
+            explicit_order = d.get("order", d.get("seq", d.get("delivery_order")))
+            order_id = int(explicit_order) if explicit_order is not None else inn_order_counters[inn]
 
             deliv = Delivery(
                 match_id=match_record.match_id,
@@ -542,34 +620,41 @@ class MatchSyncManager:
                 over_number=over_num,
                 ball_number=ball_num,
                 legal_ball_number=legal_ball,
-                batter=str(d.get("batter", "")) or None,
-                bowler=str(d.get("bowler", "")) or None,
-                non_striker=str(d.get("non_striker", "")) or None,
-                runs_batter=int(d.get("runs_batter", 0) or 0),
-                runs_total=int(d.get("runs_total", d.get("runs", 0)) or 0),
-                extras=int(d.get("extras", 0) or 0),
-                wickets=int(d.get("wickets", 0) or 0),
+                batting_team=batting_team,
+                bowling_team=bowling_team,
+                delivery_order=order_id,
+                batter=str(d.get("batter", d.get("batsman", "")) or "") or None,
+                bowler=str(d.get("bowler", "") or "") or None,
+                non_striker=str(d.get("non_striker", d.get("nonStriker", "")) or "") or None,
+                runs_batter=int(d.get("runs_batter", d.get("batsman_runs", d.get("runs_batsman", 0))) or 0),
+                runs_total=int(d.get("runs_total", d.get("runs", d.get("r", 0))) or 0),
+                extras=int(d.get("extras", d.get("extra", 0)) or 0),
+                wickets=int(d.get("wickets", d.get("wicket", d.get("isWicket", 0))) or 0),
                 raw_info=json.dumps(d) if isinstance(d, dict) else str(d),
             )
             deliveries_to_add.append(deliv)
+            delivery_by_source_index[source_index] = deliv
             deliv_count += 1
 
         session.add_all(deliveries_to_add)
+        session.flush()
 
         # Build second-innings match states for historical replay
-        inn2_deliveries = [d for d in deliveries_data if int(d.get("inning", d.get("innings", 1)) or 1) == 2]
-        if not inn2_deliveries or target_score <= 0 or self.model is None:
+        inn2_delivery_pairs = [
+            (source_index, d)
+            for source_index, d in sorted_delivery_pairs
+            if int(d.get("inning", d.get("innings", 1)) or 1) == 2
+        ]
+        if not inn2_delivery_pairs or target_score <= 0 or self.model is None:
             return deliv_count, 0
 
         cur_score = 0.0
         wickets_lost = 0
         legal_balls_completed = 0
-        prev_prob = 0.5  # Starting baseline
-
         states_by_ball = {}
-        for d in inn2_deliveries:
-            runs_total = int(d.get("runs_total", d.get("runs", 0)) or 0)
-            wickets = int(d.get("wickets", 0) or 0)
+        for source_index, d in inn2_delivery_pairs:
+            runs_total = int(d.get("runs_total", d.get("runs", d.get("r", 0))) or 0)
+            wickets = int(d.get("wickets", d.get("wicket", d.get("isWicket", 0))) or 0)
             is_extra_noball = bool(d.get("noball") or d.get("is_noball", False))
             is_extra_wide = bool(d.get("wide") or d.get("is_wide", False))
 
@@ -612,9 +697,6 @@ class MatchSyncManager:
                 proba = self.model.predict_proba(features_df)
                 win_prob = float(proba[0][1])
 
-            swing = round(win_prob - prev_prob, 4)
-            prev_prob = win_prob
-
             state_record = MatchState(
                 match_id=match_record.match_id,
                 innings=2,
@@ -627,13 +709,32 @@ class MatchSyncManager:
                 balls_remaining=balls_remaining,
                 current_run_rate=current_rr,
                 required_run_rate=required_rr,
-                chasing_team_won=match_record.winner == match_record.team_2 if match_record.winner else None,
+                chasing_team_won=(
+                    match_record.winner == match_record.team_2 if (match_record.winner and match_record.team_2) else None
+                ),
                 win_probability=win_prob,
-                probability_swing=swing,
+                probability_swing=None,
+                previous_win_probability=None,
+                absolute_probability_swing=None,
+                delivery_id=delivery_by_source_index[source_index].id,
             )
             states_by_ball[legal_balls_completed] = state_record
 
-        states_to_add = list(states_by_ball.values())
+        states_to_add = [states_by_ball[ball_count] for ball_count in sorted(states_by_ball)]
+        previous_probability = None
+        for state_record in states_to_add:
+            if previous_probability is not None:
+                state_record.previous_win_probability = round(previous_probability, 4)
+                state_record.probability_swing = round(
+                    state_record.win_probability - previous_probability,
+                    4,
+                )
+                state_record.absolute_probability_swing = round(
+                    abs(state_record.win_probability - previous_probability),
+                    4,
+                )
+            previous_probability = state_record.win_probability
+
         session.add_all(states_to_add)
         state_count = len(states_to_add)
         return deliv_count, state_count

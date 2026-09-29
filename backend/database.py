@@ -19,23 +19,25 @@ from sqlalchemy import (
     Float,
     ForeignKey,
     Integer,
+    MetaData,
     String,
     Text,
     UniqueConstraint,
     create_engine,
     func,
     inspect,
+    select,
     text,
 )
 from sqlalchemy.orm import DeclarativeBase, Session, relationship, sessionmaker
 
-# Load environment
+# Load environment — use override=False so test-injected DATABASE_URL is not overwritten
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 env_path = PROJECT_ROOT / ".env"
 if env_path.exists():
-    load_dotenv(dotenv_path=env_path)
+    load_dotenv(dotenv_path=env_path, override=False)
 else:
-    load_dotenv()
+    load_dotenv(override=False)
 
 
 class Base(DeclarativeBase):
@@ -117,6 +119,9 @@ class Delivery(Base):
     batter = Column(String(128), nullable=True)
     bowler = Column(String(128), nullable=True)
     non_striker = Column(String(128), nullable=True)
+    batting_team = Column(String(128), nullable=True)
+    bowling_team = Column(String(128), nullable=True)
+    delivery_order = Column(Integer, nullable=True)
     runs_batter = Column(Integer, default=0, nullable=False)
     runs_total = Column(Integer, default=0, nullable=False)
     extras = Column(Integer, default=0, nullable=False)
@@ -137,6 +142,8 @@ class Delivery(Base):
             "over": self.over_number,
             "ball": self.ball_number,
             "legal_ball": self.legal_ball_number,
+            "batting_team": self.batting_team,
+            "bowling_team": self.bowling_team,
             "batter": self.batter,
             "bowler": self.bowler,
             "non_striker": self.non_striker,
@@ -144,6 +151,7 @@ class Delivery(Base):
             "runs_total": self.runs_total,
             "extras": self.extras,
             "wickets": self.wickets,
+            "delivery_order": self.delivery_order,
         }
 
 
@@ -166,7 +174,10 @@ class MatchState(Base):
     required_run_rate = Column(Float, nullable=False)
     chasing_team_won = Column(Boolean, nullable=True)
     win_probability = Column(Float, nullable=False)
-    probability_swing = Column(Float, default=0.0, nullable=False)
+    probability_swing = Column(Float, nullable=True)
+    previous_win_probability = Column(Float, nullable=True)
+    absolute_probability_swing = Column(Float, nullable=True)
+    delivery_id = Column(Integer, ForeignKey("deliveries.id"), nullable=True)
 
     match = relationship("Match", back_populates="match_states")
 
@@ -191,7 +202,14 @@ class MatchState(Base):
             "chasing_team_won": self.chasing_team_won,
             "win_probability": round(self.win_probability, 4),
             "win_probability_pct": round(self.win_probability * 100, 1),
-            "probability_swing": round(self.probability_swing, 4),
+            "probability_swing": round(self.probability_swing, 4) if self.probability_swing is not None else None,
+            "previous_win_probability": round(self.previous_win_probability, 4) if self.previous_win_probability is not None else None,
+            "delivery_id": self.delivery_id,
+            "absolute_probability_swing": (
+                round(self.absolute_probability_swing, 4)
+                if self.absolute_probability_swing is not None
+                else (round(abs(self.probability_swing), 4) if self.probability_swing is not None else None)
+            ),
         }
 
 
@@ -236,20 +254,83 @@ def init_db(target_engine=None):
     Base.metadata.create_all(bind=eng)
 
     # Safe migration for existing tables created with older schemas
-    try:
-        inspector = inspect(eng)
-        if "matches" in inspector.get_table_names():
-            columns = {c["name"] for c in inspector.get_columns("matches")}
-            with eng.connect() as conn:
-                if "date_time" not in columns:
-                    conn.execute(text("ALTER TABLE matches ADD COLUMN date_time VARCHAR(64)"))
-                if "completed_at" not in columns:
-                    conn.execute(text("ALTER TABLE matches ADD COLUMN completed_at VARCHAR(64)"))
-                if "updated_at" not in columns:
-                    conn.execute(text("ALTER TABLE matches ADD COLUMN updated_at TIMESTAMP"))
-                conn.commit()
-    except Exception:
-        pass
+    with eng.begin() as conn:
+        inspector = inspect(conn)
+        table_names = set(inspector.get_table_names())
+        if "matches" in table_names:
+            m_cols = {c["name"] for c in inspector.get_columns("matches")}
+            if "date_time" not in m_cols:
+                conn.execute(text("ALTER TABLE matches ADD COLUMN date_time VARCHAR(64)"))
+            if "completed_at" not in m_cols:
+                conn.execute(text("ALTER TABLE matches ADD COLUMN completed_at VARCHAR(64)"))
+            if "updated_at" not in m_cols:
+                conn.execute(text("ALTER TABLE matches ADD COLUMN updated_at TIMESTAMP"))
+
+        if "deliveries" in table_names:
+            d_cols = {c["name"] for c in inspector.get_columns("deliveries")}
+            if "batting_team" not in d_cols:
+                conn.execute(text("ALTER TABLE deliveries ADD COLUMN batting_team VARCHAR(128)"))
+            if "bowling_team" not in d_cols:
+                conn.execute(text("ALTER TABLE deliveries ADD COLUMN bowling_team VARCHAR(128)"))
+            if "delivery_order" not in d_cols:
+                conn.execute(text("ALTER TABLE deliveries ADD COLUMN delivery_order INTEGER"))
+
+        if "match_states" in table_names:
+            ms_cols = {c["name"] for c in inspector.get_columns("match_states")}
+            if "previous_win_probability" not in ms_cols:
+                conn.execute(text("ALTER TABLE match_states ADD COLUMN previous_win_probability FLOAT"))
+            if "absolute_probability_swing" not in ms_cols:
+                conn.execute(text("ALTER TABLE match_states ADD COLUMN absolute_probability_swing FLOAT"))
+            if "delivery_id" not in ms_cols:
+                conn.execute(text(
+                    "ALTER TABLE match_states ADD COLUMN delivery_id INTEGER REFERENCES deliveries(id)"
+                ))
+
+            swing_column = next(
+                column for column in inspect(conn).get_columns("match_states")
+                if column["name"] == "probability_swing"
+            )
+            if not swing_column["nullable"]:
+                if conn.dialect.name == "postgresql":
+                    conn.execute(text(
+                        "ALTER TABLE match_states ALTER COLUMN probability_swing DROP NOT NULL"
+                    ))
+                elif conn.dialect.name == "sqlite":
+                    from sqlalchemy import Table
+
+                    reflected_metadata = MetaData()
+                    reflected_metadata.reflect(
+                        bind=conn,
+                        only=["matches", "deliveries", "match_states"],
+                    )
+                    reflected = reflected_metadata.tables["match_states"]
+                    replacement_metadata = MetaData()
+                    for referenced_table in ("matches", "deliveries"):
+                        reflected_metadata.tables[referenced_table].to_metadata(
+                            replacement_metadata
+                        )
+                    replacement = reflected.to_metadata(
+                        replacement_metadata,
+                        name="match_states_nullable_migration",
+                    )
+                    replacement.c.probability_swing.nullable = True
+                    for index in list(replacement.indexes):
+                        replacement.indexes.remove(index)
+
+                    replacement.create(conn)
+                    column_names = [column.name for column in reflected.columns]
+                    conn.execute(
+                        replacement.insert().from_select(
+                            column_names,
+                            select(*(reflected.c[name] for name in column_names)),
+                        )
+                    )
+                    conn.execute(text("DROP TABLE match_states"))
+                    conn.execute(text(
+                        "ALTER TABLE match_states_nullable_migration RENAME TO match_states"
+                    ))
+                    for index in MatchState.__table__.indexes:
+                        index.create(conn, checkfirst=True)
 
 
 def get_db_session() -> Generator[Session, None, None]:

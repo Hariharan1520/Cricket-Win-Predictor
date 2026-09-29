@@ -1,9 +1,10 @@
 import React from 'react';
 import { TrendingUp, TrendingDown, Minus } from 'lucide-react';
 
-export default function WinProbabilityCard({ match }) {
+export default function WinProbabilityCard({ match, isRecent = false, isDemo = false }) {
   if (!match) return null;
 
+  const isHistorical = isRecent || match.is_recent;
   const chasingTeam = match.chasing_team || 'India';
   const defendingTeam = match.defending_team || 'Australia';
   const chasingProb = match.win_probability_pct ?? 40.6;
@@ -20,7 +21,7 @@ export default function WinProbabilityCard({ match }) {
       {/* Title */}
       <div className="flex items-center justify-between mb-3">
         <h3 className="text-xs font-bold uppercase tracking-wider text-[#8A98A8] m-0">
-          WIN PROBABILITY
+          {isDemo ? 'DEMO WIN PROBABILITY' : isHistorical ? 'HISTORICAL WIN PROBABILITY' : 'WIN PROBABILITY'}
         </h3>
         <span className="text-[11px] font-mono text-[#8A98A8]">
           CALIBRATED 120-BALL INFERENCE

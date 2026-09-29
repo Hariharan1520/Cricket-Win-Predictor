@@ -18,6 +18,7 @@ import {
   fetchDemoMatchDetail,
   fetchHealth,
 } from './services/api';
+import { loadDemoArchive, loadRecentArchive } from './services/recentArchive';
 import { ShieldCheck, AlertCircle } from 'lucide-react';
 
 const DEFAULT_POLL_INTERVAL = 30; // seconds — mutable via Settings
@@ -26,6 +27,7 @@ export default function App() {
   const [activeMode, setActiveMode] = useState('live'); // 'live' | 'recent'
   const [liveMatches, setLiveMatches] = useState([]);
   const [recentMatches, setRecentMatches] = useState([]);
+  const [demoMatches, setDemoMatches] = useState([]);
   const [selectedMatchId, setSelectedMatchId] = useState(null);
   const [selectedMatch, setSelectedMatch] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -69,41 +71,35 @@ export default function App() {
           setSelectedMatchId(null);
           setSelectedMatch(null);
         }
+      } else if (activeMode === 'demo') {
+        const demo = await loadDemoArchive(
+          selectedMatchId,
+          fetchDemoMatches,
+          fetchDemoMatchDetail,
+        );
+        setDemoMatches(demo.matches);
+        setSelectedMatchId(demo.selectedMatchId);
+        setSelectedMatch(demo.selectedMatch);
       } else {
-        // Recent matches mode (backed by persistent DB)
-        let matches = [];
-        try {
-          const data = await fetchRecentMatches();
-          matches = data.matches || [];
-        } catch (e) {
-          console.warn('Recent matches endpoint failed, attempting fallback to demo matches:', e);
-        }
-
-        if (matches.length === 0) {
-          // Fallback to demo matches if database has not yet been populated
-          const demoData = await fetchDemoMatches();
-          matches = demoData.matches || [];
-        }
-
-        setRecentMatches(matches);
-
-        const nextId = matches.some((m) => m.match_id === selectedMatchId)
-          ? selectedMatchId
-          : matches[0]?.match_id;
-        setSelectedMatchId(nextId);
-        if (nextId) {
-          try {
-            const detail = await fetchRecentMatchDetail(nextId);
-            setSelectedMatch(detail);
-          } catch (e) {
-            const demoDetail = await fetchDemoMatchDetail(nextId);
-            setSelectedMatch(demoDetail);
-          }
-        }
+        const archive = await loadRecentArchive(
+          selectedMatchId,
+          fetchRecentMatches,
+          fetchRecentMatchDetail,
+        );
+        setRecentMatches(archive.matches);
+        setSelectedMatchId(archive.selectedMatchId);
+        setSelectedMatch(archive.selectedMatch);
       }
     } catch (err) {
       console.error('Error loading matches:', err);
-      setError(err.message || 'Failed to communicate with backend server.');
+      if (activeMode === 'recent') {
+        setRecentMatches([]);
+        setSelectedMatchId(null);
+        setSelectedMatch(null);
+        setError('Unable to load recent matches.');
+      } else {
+        setError(err.message || 'Failed to communicate with backend server.');
+      }
     } finally {
       setIsLoading(false);
       setIsRefreshing(false);
@@ -119,18 +115,17 @@ export default function App() {
       if (activeMode === 'live') {
         const detail = await fetchMatchDetail(matchId);
         setSelectedMatch(detail);
+      } else if (activeMode === 'demo') {
+        const detail = await fetchDemoMatchDetail(matchId);
+        setSelectedMatch(detail);
       } else {
-        try {
-          const detail = await fetchRecentMatchDetail(matchId);
-          setSelectedMatch(detail);
-        } catch (e) {
-          const demoDetail = await fetchDemoMatchDetail(matchId);
-          setSelectedMatch(demoDetail);
-        }
+        setSelectedMatch(null);
+        const detail = await fetchRecentMatchDetail(matchId);
+        setSelectedMatch(detail);
       }
     } catch (err) {
       console.error('Error fetching match detail:', err);
-      setError(err.message);
+      setError(activeMode === 'recent' ? 'Unable to load recent matches.' : err.message);
     } finally {
       setIsRefreshing(false);
     }
@@ -141,8 +136,9 @@ export default function App() {
     loadMatches();
   }, [activeMode]);
 
-  // Polling timer — interval configurable via Settings
+  // Polling timer — interval configurable via Settings, active ONLY in Live mode
   useEffect(() => {
+    if (activeMode !== 'live') return;
     const timer = setInterval(() => {
       setPollCountdown((prev) => {
         if (prev <= 1) {
@@ -154,7 +150,7 @@ export default function App() {
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [loadMatches, pollInterval]);
+  }, [loadMatches, pollInterval, activeMode]);
 
   const handleNavClick = (navId) => {
     setActiveNav(navId);
@@ -164,16 +160,20 @@ export default function App() {
     }
   };
 
-  const currentMatchesList = activeMode === 'live' ? liveMatches : recentMatches;
+  const currentMatchesList = activeMode === 'live'
+    ? liveMatches
+    : activeMode === 'demo'
+      ? demoMatches
+      : recentMatches;
   const isCurrentlyLive = activeMode === 'live' && liveMatches.length > 0;
-  const isRecent = activeMode === 'recent' || activeMode === 'demo';
+  const isRecent = activeMode === 'recent';
+  const isDemo = activeMode === 'demo';
 
   return (
     <div className="min-h-screen bg-[#F5F8FB] text-[#172B4D] flex flex-col font-sans selection:bg-[#0B9F72] selection:text-white">
       {/* Top Horizontal Header */}
       <Header
         isLive={isCurrentlyLive}
-        isDemo={isRecent}
         onRefresh={() => loadMatches(false)}
         isRefreshing={isRefreshing}
         activeMode={activeMode}
@@ -197,8 +197,8 @@ export default function App() {
           matches={currentMatchesList}
           selectedMatchId={selectedMatchId}
           onSelectMatch={handleSelectMatch}
-          title={activeMode === 'live' ? 'Live Matches' : 'Recent Matches'}
-          isDemo={isRecent}
+          title={activeMode === 'live' ? 'Live Matches' : isDemo ? 'Demo Matches' : 'Recent Matches'}
+          isDemo={isDemo}
         />
       )}
 
@@ -213,7 +213,7 @@ export default function App() {
         )}
 
         {/* Accurate Persistent Recent Match Archive Banner */}
-        {isRecent && (
+        {activeMode === 'recent' && (
           <div className="mb-5 px-3.5 py-2 rounded-xl bg-[#F0F4F8] border border-[#D9E2EC] text-[#334E68] text-xs flex items-center justify-between gap-3 shadow-2xs">
             <div className="flex items-center gap-2 text-xs">
               <span className="px-1.5 py-0.5 rounded text-[10px] font-bold uppercase bg-[#D9E2EC] text-[#102A43] tracking-wider">
@@ -232,11 +232,20 @@ export default function App() {
           </div>
         )}
 
+        {activeMode === 'recent' && !isLoading && !error && recentMatches.length === 0 && (
+          <div
+            role="status"
+            className="my-12 rounded-xl border border-[#D9E2EC] bg-white px-6 py-8 text-center text-sm font-semibold text-[#667085]"
+          >
+            No recent matches are currently archived.
+          </div>
+        )}
+
         {/* Live Mode & No T20 Available */}
         {activeMode === 'live' && liveMatches.length === 0 && !isLoading && (
           <NoLiveMatchState
             onSwitchToRecent={() => setActiveMode('recent')}
-            onSwitchToDemo={() => setActiveMode('recent')}
+            onSwitchToDemo={() => setActiveMode('demo')}
             onRefresh={() => loadMatches(false)}
             isRefreshing={isRefreshing}
           />
@@ -246,10 +255,10 @@ export default function App() {
         {selectedMatch && selectedMatch.available && (
           <div className="space-y-5">
             {/* 1. Match Hero / Scoreboard */}
-            <MatchHeader match={selectedMatch} />
+            <MatchHeader match={selectedMatch} isRecent={isRecent} isDemo={isDemo} />
 
             {/* 2. Win Probability Hero */}
-            <WinProbabilityCard match={selectedMatch} />
+            <WinProbabilityCard match={selectedMatch} isRecent={isRecent} isDemo={isDemo} />
 
             {/* 3. Match State (Single Horizontal Card + 8 Features Drawer) */}
             <MatchStateCard match={selectedMatch} />
@@ -261,10 +270,11 @@ export default function App() {
                   timeline={selectedMatch.timeline}
                   chasingTeam={selectedMatch.chasing_team}
                   defendingTeam={selectedMatch.defending_team}
+                  isRecent={isRecent}
                 />
               </div>
               <div className="lg:col-span-5">
-                <ProbabilitySwings recentSwings={selectedMatch.recent_swings} />
+                <ProbabilitySwings recentSwings={selectedMatch.recent_swings} isRecent={isRecent} />
               </div>
             </div>
 
@@ -274,6 +284,7 @@ export default function App() {
                 <NextOverSimulator
                   scenarios={selectedMatch.scenarios}
                   currentWinProbPct={selectedMatch.win_probability_pct}
+                  isRecent={isRecent}
                 />
               </div>
               <div className="lg:col-span-4">

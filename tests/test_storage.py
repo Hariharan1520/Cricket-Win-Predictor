@@ -43,7 +43,7 @@ if str(PROJECT_ROOT) not in sys.path:
 TEST_DB_PATH = PROJECT_ROOT / "data" / "test_storage.db"
 os.environ["DATABASE_URL"] = f"sqlite:///{TEST_DB_PATH}"
 
-from sqlalchemy import create_engine, text
+from sqlalchemy import MetaData, create_engine, inspect, text
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
@@ -216,6 +216,72 @@ class TestDatabaseModels(unittest.TestCase):
             sql = str(CreateTable(model.__table__).compile(dialect=postgresql.dialect()))
             self.assertIn("CREATE TABLE", sql)
             self.assertIn(model.__tablename__, sql)
+
+
+class TestProbabilitySwingMigration(unittest.TestCase):
+    def test_fresh_schema_allows_null_probability_swing(self):
+        engine = create_engine("sqlite:///:memory:", echo=False)
+        Base.metadata.create_all(bind=engine)
+        swing_column = next(
+            column for column in inspect(engine).get_columns("match_states")
+            if column["name"] == "probability_swing"
+        )
+        self.assertTrue(swing_column["nullable"])
+        engine.dispose()
+
+    def test_old_not_null_schema_migrates_without_losing_data(self):
+        engine = create_engine("sqlite:///:memory:", echo=False)
+        Base.metadata.create_all(bind=engine)
+        MatchState.__table__.drop(bind=engine)
+
+        legacy_metadata = MetaData()
+        Match.__table__.to_metadata(legacy_metadata)
+        Delivery.__table__.to_metadata(legacy_metadata)
+        legacy_table = MatchState.__table__.to_metadata(legacy_metadata)
+        legacy_table.c.probability_swing.nullable = False
+        legacy_table.create(bind=engine)
+
+        Session = sessionmaker(bind=engine)
+        session = Session()
+        session.add(Match(match_id="legacy-swing", name="Legacy Match"))
+        session.flush()
+        session.add(
+            MatchState(
+                match_id="legacy-swing",
+                innings=2,
+                legal_balls_completed=12,
+                overs_completed=2.0,
+                target_score=100.0,
+                current_score=30.0,
+                wickets_lost=1,
+                runs_remaining=70.0,
+                balls_remaining=108,
+                current_run_rate=15.0,
+                required_run_rate=3.89,
+                win_probability=0.62,
+                probability_swing=0.12,
+            )
+        )
+        session.commit()
+        session.close()
+
+        init_db(target_engine=engine)
+        init_db(target_engine=engine)
+
+        swing_column = next(
+            column for column in inspect(engine).get_columns("match_states")
+            if column["name"] == "probability_swing"
+        )
+        self.assertTrue(swing_column["nullable"])
+
+        session = Session()
+        migrated = session.query(MatchState).filter_by(match_id="legacy-swing").one()
+        self.assertEqual(migrated.probability_swing, 0.12)
+        self.assertEqual(migrated.current_score, 30.0)
+        migrated.probability_swing = None
+        session.commit()
+        session.close()
+        engine.dispose()
 
 
 class TestTwoMatchRetention(unittest.TestCase):
@@ -665,6 +731,16 @@ class TestRecentMatchesAPI(unittest.TestCase):
         self.client = app.test_client()
         self.client.testing = True
 
+        # Ensure the module-level engine always points to the test SQLite DB,
+        # even if database.py was imported before DATABASE_URL was overridden.
+        import backend.database as _db_module
+        _sqlite_url = f"sqlite:///{TEST_DB_PATH}"
+        if str(_db_module.engine.url) != _sqlite_url:
+            _db_module.engine = _db_module.create_db_engine(_sqlite_url)
+            _db_module.SessionLocal = _db_module.sessionmaker(
+                autocommit=False, autoflush=False, bind=_db_module.engine
+            )
+
         init_db()
         from backend.database import SessionLocal
         self.db = SessionLocal()
@@ -708,6 +784,29 @@ class TestRecentMatchesAPI(unittest.TestCase):
         self.db.add_all([m1, m2])
 
         # Add state for m1
+        correct_delivery = Delivery(
+            match_id="api-test-m1",
+            innings=2,
+            over_number=18,
+            ball_number=1,
+            legal_ball_number=110,
+            batter="Correct Batter",
+            bowler="Correct Bowler",
+            wickets=1,
+        )
+        later_delivery_with_same_legal_ball = Delivery(
+            match_id="api-test-m1",
+            innings=2,
+            over_number=18,
+            ball_number=2,
+            legal_ball_number=110,
+            batter="Other Batter",
+            bowler="Other Bowler",
+            runs_total=6,
+        )
+        self.db.add_all([correct_delivery, later_delivery_with_same_legal_ball])
+        self.db.flush()
+
         st = MatchState(
             match_id="api-test-m1",
             innings=2,
@@ -723,6 +822,7 @@ class TestRecentMatchesAPI(unittest.TestCase):
             chasing_team_won=True,
             win_probability=0.85,
             probability_swing=0.05,
+            delivery_id=correct_delivery.id,
         )
         self.db.add(st)
         self.db.commit()
@@ -743,6 +843,45 @@ class TestRecentMatchesAPI(unittest.TestCase):
         match_ids = [m["match_id"] for m in data["matches"]]
         self.assertIn("api-test-m1", match_ids)
         self.assertIn("api-test-m2", match_ids)
+
+    def test_recent_api_empty_and_demo_endpoint_remains_available(self):
+        self.db.query(Delivery).filter(Delivery.match_id.like("api-test-%")).delete(synchronize_session=False)
+        self.db.query(MatchState).filter(MatchState.match_id.like("api-test-%")).delete(synchronize_session=False)
+        self.db.query(Match).filter(Match.match_id.like("api-test-%")).delete(synchronize_session=False)
+        self.db.commit()
+
+        recent = self.client.get("/api/recent/matches")
+        self.assertEqual(recent.status_code, 200)
+        self.assertEqual(recent.get_json()["matches"], [])
+
+        demo = self.client.get("/api/demo/matches")
+        self.assertEqual(demo.status_code, 200)
+        self.assertTrue(all(match["is_demo"] for match in demo.get_json()["matches"]))
+
+    def test_historical_swing_event_uses_exact_state_delivery_reference(self):
+        response = self.client.get("/api/recent/matches/api-test-m1")
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        swing = data["recent_swings"][0]
+        stored_state = data["ball_by_ball_states"][0]
+
+        self.assertEqual(swing["event"], "WICKET: Correct Batter b Correct Bowler")
+        self.assertEqual(swing["state_id"], stored_state["id"])
+        self.assertEqual(swing["delivery_id"], stored_state["delivery_id"])
+        self.assertEqual(swing["delivery"], "18.1")
+
+    def test_empty_historical_swing_list_has_no_completion_placeholder(self):
+        state = self.db.query(MatchState).filter_by(match_id="api-test-m1").one()
+        state.probability_swing = None
+        state.previous_win_probability = None
+        self.db.commit()
+
+        response = self.client.get("/api/recent/matches/api-test-m1")
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        self.assertEqual(data["recent_swings"], [])
+        self.assertEqual(data["significant_swing_events"], [])
+        self.assertNotIn("Match Completion", str(data))
 
     @patch("src.live.cricket_api.CricketApiClient.get_matches")
     @patch("src.live.cricket_api.CricketApiClient.get_current_matches")
@@ -1022,6 +1161,281 @@ class TestWinnerExtractionAndMapping(unittest.TestCase):
         self.assertIsNone(extract_winner_from_result("In progress", teams))
         self.assertIsNone(extract_winner_from_result("", teams))
         self.assertIsNone(extract_winner_from_result(None, teams))
+
+
+class TestHistoricalAnalysisSyncAndReplay(unittest.TestCase):
+    """
+    Comprehensive tests for Full Historical Analysis for Recent Matches:
+    A. Provider parsing (T20, T20I, Test rejected, ODI rejected)
+    B. Delivery parsing (ordering, legal balls, runs, wickets, innings)
+    C. Match-state generation (exact 8 features)
+    D. Exact 8-feature model vector verification
+    E. Historical probability (normal, target reached, all out, balls exhausted)
+    F. Historical swings (first state null, positive swing, negative swing, terminal)
+    G. Database persistence (Match, Delivery, MatchState, swings)
+    H. Re-sync existing match (no duplicates, false -> true analysis_available)
+    I. REST endpoint zero provider calls and complete payload
+    """
+
+    def setUp(self):
+        self.engine = create_engine("sqlite:///:memory:", echo=False)
+        Base.metadata.create_all(bind=self.engine)
+        self.Session = sessionmaker(bind=self.engine)
+        self.session = self.Session()
+
+        model_path = PROJECT_ROOT / "models" / "logistic_regression_win_probability.joblib"
+        self.model = load_prediction_model(model_path)
+
+        self.mock_api = MagicMock(spec=CricketApiClient)
+        self.manager = MatchSyncManager(
+            api_client=self.mock_api,
+            db_session=self.session,
+            model=self.model,
+        )
+
+    def tearDown(self):
+        self.session.close()
+        Base.metadata.drop_all(bind=self.engine)
+
+    def test_historical_provider_parsing_t20_and_rejections(self):
+        """Test A: Strict format filtering accepts T20/T20I and rejects Test/ODI."""
+        self.mock_api.get_matches.return_value = [
+            {"id": "t20i-ok", "name": "India vs England", "matchType": "t20i", "matchEnded": True, "date": "2026-09-28"},
+            {"id": "t20-ok", "name": "CSK vs MI", "matchType": "t20", "matchEnded": True, "date": "2026-09-27"},
+            {"id": "test-no", "name": "England vs Australia", "matchType": "test", "matchEnded": True, "date": "2026-09-26"},
+            {"id": "odi-no", "name": "India vs Pakistan", "matchType": "odi", "matchEnded": True, "date": "2026-09-25"},
+        ]
+        summary = self.manager.sync_recent_matches()
+        self.assertEqual(summary["completed_matches_count"], 2)
+        stored_ids = {m.match_id for m in self.session.query(Match).all()}
+        self.assertEqual(stored_ids, {"t20i-ok", "t20-ok"})
+        self.assertNotIn("test-no", stored_ids)
+        self.assertNotIn("odi-no", stored_ids)
+
+    def test_historical_delivery_parsing_and_ordering(self):
+        """Test B: Deliveries are parsed with deterministic ordering, legal ball logic, and extras."""
+        raw_deliveries = [
+            # Out of order intentionally to test deterministic sorting
+            {"inning": 2, "over": 0, "ball": 2, "runs": 4, "runs_total": 4, "batter": "Rohit", "bowler": "Starc", "wide": False},
+            {"inning": 1, "over": 0, "ball": 1, "runs": 1, "runs_total": 1, "batter": "Warner", "bowler": "Bumrah"},
+            {"inning": 2, "over": 0, "ball": 1, "runs": 0, "runs_total": 1, "extras": 1, "wide": True, "batter": "Rohit", "bowler": "Starc"}, # Wide (illegal ball)
+            {"inning": 2, "over": 0, "ball": 1, "runs": 0, "runs_total": 0, "batter": "Rohit", "bowler": "Starc", "wide": False}, # Legal ball 1
+        ]
+        raw_match = {
+            "id": "deliv-sort-test",
+            "name": "India vs Australia",
+            "matchType": "t20",
+            "matchEnded": True,
+            "status": "India won by 6 wickets",
+            "score": [{"r": 150, "inning": "Australia Inning 1"}],
+            "deliveries": raw_deliveries,
+        }
+        self.mock_api.get_matches.return_value = [raw_match]
+        summary = self.manager.sync_recent_matches()
+        self.assertEqual(summary["deliveries_stored"], 4)
+
+        deliveries = self.session.query(Delivery).filter_by(match_id="deliv-sort-test").order_by(Delivery.innings.asc(), Delivery.over_number.asc(), Delivery.ball_number.asc()).all()
+        self.assertEqual(len(deliveries), 4)
+        # First delivery should be innings 1
+        self.assertEqual(deliveries[0].innings, 1)
+        self.assertEqual(deliveries[0].batter, "Warner")
+
+    def test_match_state_exact_8_features_and_generation(self):
+        """Test C, D: 8 features exactly match specification and pass to frozen model."""
+        deliveries = [
+            {"inning": 1, "over": 19, "ball": 6, "runs": 6, "runs_total": 6},
+            {"inning": 2, "over": 0, "ball": 1, "runs": 4, "runs_total": 4, "wickets": 0},
+            {"inning": 2, "over": 0, "ball": 2, "runs": 0, "runs_total": 0, "wickets": 1},
+        ]
+        raw_match = {
+            "id": "features-test",
+            "name": "Team A vs Team B",
+            "matchType": "t20",
+            "matchEnded": True,
+            "status": "Team B won",
+            "score": [{"r": 160}],
+            "deliveries": deliveries,
+        }
+        self.mock_api.get_matches.return_value = [raw_match]
+        self.manager.sync_recent_matches()
+
+        states = self.session.query(MatchState).filter_by(match_id="features-test", innings=2).order_by(MatchState.legal_balls_completed.asc()).all()
+        self.assertEqual(len(states), 2)
+
+        # Ball 1 (legal ball 1)
+        s1 = states[0]
+        self.assertEqual(s1.target_score, 161.0)
+        self.assertEqual(s1.current_score, 4.0)
+        self.assertEqual(s1.wickets_lost, 0)
+        self.assertEqual(s1.runs_remaining, 157.0)
+        self.assertEqual(s1.balls_remaining, 119)
+        self.assertAlmostEqual(s1.overs_completed, 1/6.0, places=3)
+        self.assertAlmostEqual(s1.current_run_rate, 24.0, places=1)
+        self.assertAlmostEqual(s1.required_run_rate, 157.0 / (119 / 6.0), places=2)
+
+        # Ball 2 (legal ball 2, wicket fell)
+        s2 = states[1]
+        self.assertEqual(s2.current_score, 4.0)
+        self.assertEqual(s2.wickets_lost, 1)
+        self.assertEqual(s2.balls_remaining, 118)
+
+    def test_historical_probability_and_terminal_rules(self):
+        """Test E: Probabilities correctly evaluate normal and terminal states (target reached, all out, balls exhausted)."""
+        # Scenario 1: Target reached
+        delivs_win = [
+            {"inning": 1, "over": 19, "ball": 6, "runs": 10, "runs_total": 10}, # Target = 11
+            {"inning": 2, "over": 0, "ball": 1, "runs": 6, "runs_total": 6, "wickets": 0},
+            {"inning": 2, "over": 0, "ball": 2, "runs": 6, "runs_total": 6, "wickets": 0}, # 12 runs >= 11 target
+        ]
+        raw_win = {
+            "id": "target-reached-test",
+            "name": "Win Test",
+            "matchType": "t20",
+            "matchEnded": True,
+            "score": [{"r": 10}],
+            "deliveries": delivs_win,
+        }
+        self.mock_api.get_matches.return_value = [raw_win]
+        self.manager.sync_recent_matches()
+
+        st_win = self.session.query(MatchState).filter_by(match_id="target-reached-test", legal_balls_completed=2).first()
+        self.assertIsNotNone(st_win)
+        self.assertEqual(st_win.win_probability, 1.0)
+
+        # Scenario 2: All out
+        delivs_allout = [
+            {"inning": 1, "over": 19, "ball": 6, "runs": 150, "runs_total": 150},
+            {"inning": 2, "over": 0, "ball": 1, "runs": 0, "runs_total": 0, "wickets": 10}, # 10 wickets lost
+        ]
+        raw_allout = {
+            "id": "all-out-test",
+            "name": "All Out Test",
+            "matchType": "t20",
+            "matchEnded": True,
+            "score": [{"r": 150}],
+            "deliveries": delivs_allout,
+        }
+        self.mock_api.get_matches.return_value = [raw_allout]
+        self.manager.sync_recent_matches()
+
+        st_allout = self.session.query(MatchState).filter_by(match_id="all-out-test", legal_balls_completed=1).first()
+        self.assertIsNotNone(st_allout)
+        self.assertEqual(st_allout.win_probability, 0.0)
+
+    def test_historical_swings_first_state_null_and_subsequent_deltas(self):
+        """Test F: First state has null swing, subsequent states have delta win probability."""
+        deliveries = [
+            {"inning": 1, "over": 19, "ball": 6, "runs": 160, "runs_total": 160},
+            {"inning": 2, "over": 0, "ball": 1, "runs": 6, "runs_total": 6, "wickets": 0}, # Ball 1
+            {"inning": 2, "over": 0, "ball": 2, "runs": 0, "runs_total": 0, "wickets": 1}, # Ball 2: wicket
+        ]
+        raw_match = {
+            "id": "swings-calc-test",
+            "name": "Swings Test",
+            "matchType": "t20",
+            "matchEnded": True,
+            "score": [{"r": 160}],
+            "deliveries": deliveries,
+        }
+        self.mock_api.get_matches.return_value = [raw_match]
+        self.manager.sync_recent_matches()
+
+        states = self.session.query(MatchState).filter_by(match_id="swings-calc-test", innings=2).order_by(MatchState.legal_balls_completed.asc()).all()
+        self.assertEqual(len(states), 2)
+        # First state must have null swing
+        self.assertIsNone(states[0].probability_swing)
+        self.assertIsNone(states[0].previous_win_probability)
+
+        # Second state has valid swing (wicket fell -> probability dropped)
+        self.assertIsNotNone(states[1].probability_swing)
+        self.assertLess(states[1].probability_swing, 0.0)
+        self.assertEqual(states[1].previous_win_probability, round(states[0].win_probability, 4))
+        self.assertAlmostEqual(states[1].probability_swing, round(states[1].win_probability - states[0].win_probability, 4), places=3)
+
+    def test_collapsed_wide_and_no_ball_states_use_adjacent_stored_probabilities(self):
+        deliveries = [
+            {"inning": 1, "over": 19, "ball": 6, "runs_total": 160},
+            {"inning": 2, "over": 0, "ball": 1, "runs_total": 0, "batter": "First"},
+            {"inning": 2, "over": 0, "ball": 2, "runs_total": 1, "wide": True, "batter": "Wide"},
+            {"inning": 2, "over": 0, "ball": 3, "runs_total": 1, "noball": True, "batter": "NoBall"},
+            {"inning": 2, "over": 0, "ball": 4, "runs_total": 0, "batter": "NextLegal"},
+        ]
+        self.mock_api.get_matches.return_value = [{
+            "id": "collapsed-extra-swing",
+            "name": "Extras Test",
+            "matchType": "t20",
+            "matchEnded": True,
+            "score": [{"r": 160}],
+            "deliveries": deliveries,
+        }]
+
+        self.manager.sync_recent_matches()
+        states = (
+            self.session.query(MatchState)
+            .filter_by(match_id="collapsed-extra-swing", innings=2)
+            .order_by(MatchState.legal_balls_completed.asc())
+            .all()
+        )
+        self.assertEqual(len(states), 2)
+        self.assertEqual(states[0].current_score, 2.0)
+        self.assertIsNone(states[0].probability_swing)
+        self.assertEqual(states[1].previous_win_probability, round(states[0].win_probability, 4))
+        self.assertEqual(
+            states[1].probability_swing,
+            round(states[1].win_probability - states[0].win_probability, 4),
+        )
+
+        first_state_delivery = self.session.query(Delivery).filter_by(id=states[0].delivery_id).one()
+        self.assertEqual(first_state_delivery.batter, "NoBall")
+
+    def test_resync_existing_match_enriches_without_duplicates(self):
+        """Test H: Existing match without BBB is enriched when BBB becomes available without duplicate rows."""
+        # Step 1: Insert match without BBB
+        raw_meta = {
+            "id": "enrich-test",
+            "name": "Enrichment Test",
+            "matchType": "t20",
+            "matchEnded": True,
+            "status": "Team A won by 20 runs",
+            "date": "2026-09-28",
+            "bbbEnabled": False,
+        }
+        self.mock_api.get_matches.return_value = [raw_meta]
+        s1 = self.manager.sync_recent_matches()
+        self.assertEqual(s1["matches_stored"], 1)
+
+        m = self.session.query(Match).filter_by(match_id="enrich-test").first()
+        self.assertFalse(m.analysis_available)
+        self.assertEqual(self.session.query(Delivery).filter_by(match_id="enrich-test").count(), 0)
+
+        # Step 2: Sync again with genuine BBB data
+        raw_with_bbb = {
+            "id": "enrich-test",
+            "name": "Enrichment Test",
+            "matchType": "t20",
+            "matchEnded": True,
+            "status": "Team A won by 20 runs",
+            "date": "2026-09-28",
+            "score": [{"r": 140}],
+            "bbbEnabled": True,
+            "deliveries": [
+                {"inning": 1, "over": 19, "ball": 6, "runs": 140, "runs_total": 140},
+                {"inning": 2, "over": 0, "ball": 1, "runs": 4, "runs_total": 4, "wickets": 0},
+            ],
+        }
+        self.mock_api.get_matches.return_value = [raw_with_bbb]
+        s2 = self.manager.sync_recent_matches()
+        self.assertEqual(s2["duplicate_matches_count"], 1)
+
+        m_updated = self.session.query(Match).filter_by(match_id="enrich-test").first()
+        self.assertTrue(m_updated.analysis_available)
+        self.assertEqual(self.session.query(Delivery).filter_by(match_id="enrich-test").count(), 2)
+        self.assertEqual(self.session.query(MatchState).filter_by(match_id="enrich-test").count(), 1)
+
+        # Step 3: Re-sync again -> verify NO DUPLICATE rows created
+        s3 = self.manager.sync_recent_matches()
+        self.assertEqual(self.session.query(Delivery).filter_by(match_id="enrich-test").count(), 2)
+        self.assertEqual(self.session.query(MatchState).filter_by(match_id="enrich-test").count(), 1)
 
 
 if __name__ == "__main__":

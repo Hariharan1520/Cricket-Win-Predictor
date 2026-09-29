@@ -15,15 +15,15 @@ export default function MatchSelector({
     if (m.match_id === 'demo-match-1') {
       return {
         teams: 'AUSTRALIA vs INDIA',
-        liveMeta: 'T20 · LIVE · 16.0 OV',
-        situation: 'India need 48 from 24',
+        liveMeta: 'T20 · DEMO · 16.0 OV',
+        situation: 'SIMULATED: India need 48 from 24',
       };
     }
     if (m.match_id === 'demo-match-2') {
       return {
         teams: 'ENGLAND vs SOUTH AFRICA',
-        liveMeta: 'T20 · LIVE · 17.0 OV',
-        situation: 'South Africa need 28 from 18',
+        liveMeta: 'T20 · DEMO · 17.0 OV',
+        situation: 'SIMULATED: South Africa need 28 from 18',
       };
     }
 

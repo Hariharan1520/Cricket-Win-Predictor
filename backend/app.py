@@ -24,12 +24,12 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-# Load .env
+# Load .env — but never override an already-set DATABASE_URL (e.g. from tests)
 env_file = PROJECT_ROOT / ".env"
 if env_file.exists():
-    load_dotenv(dotenv_path=env_file)
+    load_dotenv(dotenv_path=env_file, override=False)
 else:
-    load_dotenv()
+    load_dotenv(override=False)
 
 from src.live.cricket_api import (
     CricketApiClient,
@@ -38,6 +38,7 @@ from src.live.cricket_api import (
     CricketApiRateLimitError,
 )
 from src.live.live_features import (
+    FEATURE_COLS,
     LiveMatchFeatures,
     NormalizedMatch,
     extract_match_state_features,
@@ -381,6 +382,8 @@ def get_recent_matches():
                 d = m.to_dict()
                 d["is_recent"] = True
                 d["is_live"] = False
+                d["deliveries_count"] = session.query(Delivery).filter_by(match_id=m.match_id).count()
+                d["states_count"] = session.query(MatchState).filter_by(match_id=m.match_id).count()
                 result.append(d)
 
             msg = (
@@ -433,10 +436,24 @@ def get_recent_match_detail(match_id: str):
                         "venue": m.venue,
                         "reason": "Historical probability replay unavailable for this match because ball-by-ball data was not provided by the data source.",
                         "match": m_dict,
+                        "match_metadata": m_dict,
+                        "data_availability_status": {
+                            "analysis_available": False,
+                            "reason": "Historical probability replay unavailable for this match because ball-by-ball data was not provided by the data source.",
+                            "deliveries_count": 0,
+                            "states_count": 0,
+                        },
                     }
                 )
 
-            # Fetch second-innings states
+            # Fetch deliveries and second-innings states
+            deliveries = (
+                session.query(Delivery)
+                .filter_by(match_id=match_id)
+                .order_by(Delivery.innings.asc(), Delivery.over_number.asc(), Delivery.ball_number.asc())
+                .all()
+            )
+
             states = (
                 session.query(MatchState)
                 .filter_by(match_id=match_id, innings=2)
@@ -448,6 +465,7 @@ def get_recent_match_detail(match_id: str):
                 return jsonify(
                     {
                         "available": False,
+                        "analysis_available": False,
                         "is_demo": False,
                         "is_recent": True,
                         "mode": "RECENT MATCHES",
@@ -458,6 +476,7 @@ def get_recent_match_detail(match_id: str):
                         "venue": m.venue,
                         "reason": "No second-innings state progression found.",
                         "match": m_dict,
+                        "match_metadata": m_dict,
                     }
                 )
 
@@ -489,31 +508,82 @@ def get_recent_match_detail(match_id: str):
                         }
                     )
 
-            # Build recent swings (significant probability changes)
-            swings_candidates = [s for s in states if abs(s.probability_swing) >= 0.01]
+            deliv_by_id = {d.id: d for d in deliveries if d.innings == 2}
+
+            # Helper for swing event text
+            def _build_event_label(st, d_obj):
+                if d_obj:
+                    if d_obj.wickets > 0:
+                        bat = d_obj.batter or "Batter"
+                        bwl = d_obj.bowler or "Bowler"
+                        return f"WICKET: {bat} b {bwl}"
+                    elif d_obj.runs_total >= 6:
+                        bat = d_obj.batter or "Batter"
+                        bwl = d_obj.bowler or "Bowler"
+                        return f"MAXIMUM SIX: {bat} off {bwl}"
+                    elif d_obj.runs_total >= 4:
+                        bat = d_obj.batter or "Batter"
+                        bwl = d_obj.bowler or "Bowler"
+                        return f"BOUNDARY FOUR: {bat} off {bwl}"
+                    elif d_obj.runs_total == 0:
+                        bwl = d_obj.bowler or "Bowler"
+                        return f"DOT BALL by {bwl}"
+                    else:
+                        r = d_obj.runs_total
+                        return f"{r} RUN{'S' if r > 1 else ''} ({int(st.current_score)}/{st.wickets_lost})"
+                return f"{int(st.current_score)}/{st.wickets_lost} (Need {int(st.runs_remaining)})"
+
+            # Build swings list
+            swings_candidates = [
+                s for s in states
+                if s.probability_swing is not None and abs(s.probability_swing) >= 0.005
+            ]
+
             recent_swings = []
             for s in swings_candidates[-5:]:
+                s_deliv = deliv_by_id.get(s.delivery_id)
                 swing_pct = round(s.probability_swing * 100, 1)
                 swing_str = f"+{swing_pct}%" if swing_pct > 0 else f"{swing_pct}%"
                 swing_type = "positive" if swing_pct > 0 else "negative" if swing_pct < 0 else "neutral"
                 recent_swings.append(
                     {
-                        "delivery": f"Over {s.overs_completed:.1f}",
-                        "event": f"{int(s.current_score)}/{s.wickets_lost} (Need {int(s.runs_remaining)})",
+                        "delivery": (
+                            f"{s_deliv.over_number}.{s_deliv.ball_number}"
+                            if s_deliv else f"Over {s.overs_completed:.1f}"
+                        ),
+                        "event": _build_event_label(s, s_deliv),
                         "swing": swing_str,
                         "type": swing_type,
+                        "swing_value": s.probability_swing,
+                        "state_id": s.id,
+                        "delivery_id": s.delivery_id,
                     }
                 )
 
-            if not recent_swings:
-                recent_swings = [
+            # Significant swing events: top absolute magnitude swings
+            sorted_swings = sorted(
+                [s for s in states if s.probability_swing is not None],
+                key=lambda s: abs(s.probability_swing),
+                reverse=True,
+            )
+            significant_swings = []
+            for s in sorted_swings[:6]:
+                s_deliv = deliv_by_id.get(s.delivery_id)
+                s_pct = round(s.probability_swing * 100, 1)
+                significant_swings.append(
                     {
-                        "delivery": f"Over {latest_state.overs_completed:.1f}",
-                        "event": "Match Completion",
-                        "swing": f"{round(latest_state.probability_swing * 100, 1)}%",
-                        "type": "neutral",
+                        "delivery": (
+                            f"{s_deliv.over_number}.{s_deliv.ball_number}"
+                            if s_deliv else f"Over {s.overs_completed:.1f}"
+                        ),
+                        "event": _build_event_label(s, s_deliv),
+                        "swing": f"+{s_pct}%" if s_pct > 0 else f"{s_pct}%",
+                        "absolute_swing": round(abs(s.probability_swing) * 100, 1),
+                        "type": "positive" if s_pct > 0 else "negative",
+                        "state_id": s.id,
+                        "delivery_id": s.delivery_id,
                     }
-                ]
+                )
 
             # Run simulation for current state (using frozen Phase 6 simulation engine)
             _, scenarios_df = simulate_next_over(
@@ -530,19 +600,41 @@ def get_recent_match_detail(match_id: str):
             chasing_team = m.team_2 or "Team 2"
             defending_team = m.team_1 or "Team 1"
 
+            final_score_dict = {
+                "runs": int(latest_state.current_score),
+                "wickets": latest_state.wickets_lost,
+                "overs": latest_state.overs_completed,
+                "target": int(latest_state.target_score),
+            }
+
+            innings_info = [
+                {"inning": 1, "target": int(latest_state.target_score)},
+                {
+                    "inning": 2,
+                    "runs": int(latest_state.current_score),
+                    "wickets": latest_state.wickets_lost,
+                    "overs": latest_state.overs_completed,
+                },
+            ]
+
             return jsonify(
                 {
                     "available": True,
+                    "analysis_available": True,
                     "is_demo": False,
                     "is_recent": True,
                     "mode": "RECENT MATCHES",
                     "match_id": m.match_id,
                     "match_name": m.name,
+                    "match": m_dict,
+                    "match_metadata": m_dict,
                     "format": m.format,
                     "status": m.status,
                     "venue": m.venue,
                     "chasing_team": chasing_team,
                     "defending_team": defending_team,
+                    "final_score": final_score_dict,
+                    "innings_information": innings_info,
                     "current_score": latest_state.current_score,
                     "wickets_lost": latest_state.wickets_lost,
                     "overs_completed": latest_state.overs_completed,
@@ -554,6 +646,9 @@ def get_recent_match_detail(match_id: str):
                     "current_run_rate": latest_state.current_run_rate,
                     "required_run_rate": latest_state.required_run_rate,
                     "win_probability": latest_state.win_probability,
+                    "current_probability": latest_state.win_probability,
+                    "current_win_probability": latest_state.win_probability,
+                    "final_win_probability": latest_state.win_probability,
                     "loss_probability": round(1.0 - latest_state.win_probability, 4),
                     "win_probability_pct": round(latest_state.win_probability * 100, 1),
                     "loss_probability_pct": round((1.0 - latest_state.win_probability) * 100, 1),
@@ -565,10 +660,27 @@ def get_recent_match_detail(match_id: str):
                         else None
                     ),
                     "win_probability_change": latest_state.probability_swing,
-                    "absolute_probability_swing": abs(latest_state.probability_swing),
+                    "absolute_probability_swing": (
+                        abs(latest_state.probability_swing) if latest_state.probability_swing is not None else None
+                    ),
                     "timeline": timeline,
+                    "win_probability_timeline": timeline,
                     "recent_swings": recent_swings,
+                    "win_probability_swings": recent_swings,
+                    "significant_swing_events": significant_swings,
+                    "ball_by_ball_states": [st.to_dict() for st in states],
                     "scenarios": scenarios_df.to_dict(orient="records"),
+                    "model_information": {
+                        "name": "Logistic Regression (Phase 3 Frozen Baseline)",
+                        "features": FEATURE_COLS,
+                        "features_count": len(FEATURE_COLS),
+                        "features_order": FEATURE_COLS,
+                    },
+                    "data_availability_status": {
+                        "analysis_available": True,
+                        "deliveries_count": len(deliveries),
+                        "states_count": len(states),
+                    },
                     "last_updated": m.stored_at.isoformat() if m.stored_at else datetime.now(timezone.utc).isoformat(),
                 }
             )

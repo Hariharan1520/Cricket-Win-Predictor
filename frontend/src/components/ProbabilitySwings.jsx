@@ -40,7 +40,7 @@ function EventBadge({ label }) {
   );
 }
 
-export default function ProbabilitySwings({ recentSwings }) {
+export default function ProbabilitySwings({ recentSwings, isRecent = false }) {
   const defaultSwings = [
     { delivery: '14.3', event: 'FOUR', swing: '+4.8%', type: 'positive' },
     { delivery: '13.5', event: 'WICKET', swing: '-7.4%', type: 'negative' },
@@ -48,7 +48,11 @@ export default function ProbabilitySwings({ recentSwings }) {
     { delivery: '11.2', event: 'DOT BALL', swing: '-1.8%', type: 'negative' },
   ];
 
-  const swings = recentSwings && recentSwings.length > 0 ? recentSwings : defaultSwings;
+  const swings = recentSwings && recentSwings.length > 0
+    ? recentSwings
+    : isRecent
+      ? []
+      : defaultSwings;
 
   return (
     <div id="swings" className="bg-white border border-[#E3EAF0] rounded-2xl p-5 sm:p-6 shadow-xs flex flex-col justify-between h-full">
@@ -70,6 +74,11 @@ export default function ProbabilitySwings({ recentSwings }) {
 
         {/* Rows */}
         <div className="space-y-2.5">
+          {isRecent && swings.length === 0 && (
+            <p className="rounded-lg border border-[#E3EAF0] bg-[#F5F8FB] px-3 py-4 text-xs text-[#667085]">
+              No historical swing events are available.
+            </p>
+          )}
           {swings.map((s, idx) => {
             const isPos = s.type === 'positive' || (typeof s.swing === 'string' && s.swing.startsWith('+'));
             const isNeg = s.type === 'negative' || (typeof s.swing === 'string' && s.swing.startsWith('-'));

@@ -171,3 +171,13 @@ class CricketApiClient:
             raise ValueError("match_id cannot be empty")
         data = self._request("match_info", params={"id": match_id})
         return data.get("data", {})
+
+    def get_match_bbb(self, match_id: str, offset: int = 0) -> Dict[str, Any]:
+        """
+        Retrieves ball-by-ball data for a specific match.
+        Endpoint: /match_bbb?id={match_id}&offset={offset}
+        """
+        if not match_id:
+            raise ValueError("match_id cannot be empty")
+        data = self._request("match_bbb", params={"id": match_id, "offset": offset})
+        return data.get("data", {})

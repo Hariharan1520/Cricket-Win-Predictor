@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { RefreshCw, Settings, Radio, Layers, X, Clock } from 'lucide-react';
+import { RefreshCw, Settings, Radio, Layers, Play, X, Clock } from 'lucide-react';
 
 // ─── Settings Modal ───────────────────────────────────────────────────────────
 function SettingsModal({ isOpen, onClose, pollInterval, onPollIntervalChange }) {
@@ -102,7 +102,6 @@ function SettingsModal({ isOpen, onClose, pollInterval, onPollIntervalChange }) 
 // ─── Header ───────────────────────────────────────────────────────────────────
 export default function Header({
   isLive,
-  isDemo,
   onRefresh,
   isRefreshing,
   activeMode,
@@ -192,7 +191,7 @@ export default function Header({
               <button
                 onClick={() => setActiveMode('recent')}
                 className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-bold transition ${
-                  activeMode === 'recent' || activeMode === 'demo'
+                  activeMode === 'recent'
                     ? 'bg-[#186ADE] text-white shadow-2xs'
                     : 'text-[#667085] hover:text-[#172B4D]'
                 }`}
@@ -200,17 +199,30 @@ export default function Header({
                 <Layers className="w-3 h-3" />
                 <span>RECENT</span>
               </button>
+              <button
+                onClick={() => setActiveMode('demo')}
+                className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-bold transition ${
+                  activeMode === 'demo'
+                    ? 'bg-[#667085] text-white shadow-2xs'
+                    : 'text-[#667085] hover:text-[#172B4D]'
+                }`}
+              >
+                <Play className="w-3 h-3" />
+                <span>DEMO</span>
+              </button>
             </div>
 
-            {/* Polling Status Indicator */}
-            <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#F5F8FB] border border-[#E3EAF0] text-[11px] font-mono text-[#667085]">
-              <span
-                className={`w-1.5 h-1.5 rounded-full ${
-                  activeMode === 'live' && isLive ? 'bg-[#0B9F72] animate-pulse' : 'bg-[#8A98A8]'
-                }`}
-              />
-              <span>Poll {pollCountdown}s</span>
-            </div>
+            {/* Polling Status Indicator — Live mode only */}
+            {activeMode === 'live' && (
+              <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#F5F8FB] border border-[#E3EAF0] text-[11px] font-mono text-[#667085]">
+                <span
+                  className={`w-1.5 h-1.5 rounded-full ${
+                    isLive ? 'bg-[#0B9F72] animate-pulse' : 'bg-[#8A98A8]'
+                  }`}
+                />
+                <span>Poll {pollCountdown}s</span>
+              </div>
+            )}
 
             {/* Refresh Button */}
             <button

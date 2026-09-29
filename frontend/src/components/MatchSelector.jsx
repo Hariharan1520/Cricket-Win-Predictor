@@ -1,11 +1,11 @@
 import React from 'react';
-import { ChevronDown } from 'lucide-react';
 
+// ─── MatchSelector ────────────────────────────────────────────────────────────
 export default function MatchSelector({
   matches,
   selectedMatchId,
   onSelectMatch,
-  title = "Live Matches",
+  title = 'Live Matches',
   isDemo = false,
 }) {
   if (!matches || matches.length === 0) return null;
@@ -49,9 +49,9 @@ export default function MatchSelector({
 
   return (
     <div id="live-matches" className="bg-white border-b border-[#E3EAF0] py-2.5 px-4 sm:px-6">
-      <div className="max-w-7xl mx-auto flex items-center justify-between gap-3">
+      <div className="max-w-7xl mx-auto">
         {/* Horizontal Match Strip */}
-        <div className="flex items-center gap-2.5 overflow-x-auto pb-1 scrollbar-none flex-1">
+        <div className="flex items-center gap-2.5 overflow-x-auto pb-1 scrollbar-none">
           {matches.map((m) => {
             const isSelected = m.match_id === selectedMatchId;
             const info = getMatchSituation(m);
@@ -83,7 +83,7 @@ export default function MatchSelector({
                   {info.liveMeta}
                 </div>
 
-                {/* Chase Equation */}
+                {/* Chase Equation / Result */}
                 <div className="text-[11px] font-semibold text-[#0B9F72] mt-0.5 pl-3.5 whitespace-nowrap">
                   {info.situation}
                 </div>
@@ -91,15 +91,6 @@ export default function MatchSelector({
             );
           })}
         </div>
-
-        {/* All Matches Dropdown */}
-        <button
-          className="flex-shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white hover:bg-[#F5F8FB] border border-[#E3EAF0] text-[#667085] hover:text-[#172B4D] text-xs font-semibold transition shadow-2xs"
-          title="All matches list"
-        >
-          <span>All Matches</span>
-          <ChevronDown className="w-3.5 h-3.5 text-[#8A98A8]" />
-        </button>
       </div>
     </div>
   );

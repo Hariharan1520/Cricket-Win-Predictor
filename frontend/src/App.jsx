@@ -20,7 +20,7 @@ import {
 } from './services/api';
 import { ShieldCheck, AlertCircle } from 'lucide-react';
 
-const DEFAULT_POLL_INTERVAL = 30; // seconds
+const DEFAULT_POLL_INTERVAL = 30; // seconds — mutable via Settings
 
 export default function App() {
   const [activeMode, setActiveMode] = useState('live'); // 'live' | 'recent'
@@ -31,6 +31,7 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState(null);
+  const [pollInterval, setPollInterval] = useState(DEFAULT_POLL_INTERVAL); // user-configurable via Settings
   const [pollCountdown, setPollCountdown] = useState(DEFAULT_POLL_INTERVAL);
   const [backendHealth, setBackendHealth] = useState(null);
   const [activeNav, setActiveNav] = useState('live-matches');
@@ -106,9 +107,9 @@ export default function App() {
     } finally {
       setIsLoading(false);
       setIsRefreshing(false);
-      setPollCountdown(DEFAULT_POLL_INTERVAL);
+      setPollCountdown(pollInterval);
     }
-  }, [activeMode, selectedMatchId]);
+  }, [activeMode, selectedMatchId, pollInterval]);
 
   // Handle match selection
   const handleSelectMatch = async (matchId) => {
@@ -140,20 +141,20 @@ export default function App() {
     loadMatches();
   }, [activeMode]);
 
-  // Polling timer (30s)
+  // Polling timer — interval configurable via Settings
   useEffect(() => {
     const timer = setInterval(() => {
       setPollCountdown((prev) => {
         if (prev <= 1) {
           loadMatches(true);
-          return DEFAULT_POLL_INTERVAL;
+          return pollInterval;
         }
         return prev - 1;
       });
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [loadMatches]);
+  }, [loadMatches, pollInterval]);
 
   const handleNavClick = (navId) => {
     setActiveNav(navId);
@@ -179,6 +180,11 @@ export default function App() {
         setActiveMode={(mode) => {
           setActiveMode(mode);
           setError(null);
+        }}
+        pollInterval={pollInterval}
+        onPollIntervalChange={(newInterval) => {
+          setPollInterval(newInterval);
+          setPollCountdown(newInterval); // reset countdown immediately
         }}
         pollCountdown={pollCountdown}
         activeNav={activeNav}
@@ -206,15 +212,15 @@ export default function App() {
           </div>
         )}
 
-        {/* Refined Persistent Recent Match Archive Banner */}
+        {/* Accurate Persistent Recent Match Archive Banner */}
         {isRecent && (
           <div className="mb-5 px-3.5 py-2 rounded-xl bg-[#F0F4F8] border border-[#D9E2EC] text-[#334E68] text-xs flex items-center justify-between gap-3 shadow-2xs">
             <div className="flex items-center gap-2 text-xs">
               <span className="px-1.5 py-0.5 rounded text-[10px] font-bold uppercase bg-[#D9E2EC] text-[#102A43] tracking-wider">
-                RECENT MATCH REPLAY
+                RECENT MATCH ARCHIVE
               </span>
               <span>
-                Persistent PostgreSQL archive · Ball-by-ball win-probability trajectory & swings.
+                Persistent PostgreSQL storage · Real completed T20 matches
               </span>
             </div>
             <button

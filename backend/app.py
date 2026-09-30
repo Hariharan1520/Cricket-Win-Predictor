@@ -56,7 +56,7 @@ from src.simulation.next_over_simulator import (
     BASELINE_SCENARIOS,
     simulate_next_over,
 )
-from backend.database import Delivery, Match, MatchState, check_db_connection, get_db_session
+from backend.database import Delivery, Match, MatchState, check_db_connection, get_db_session, init_db
 
 logging.basicConfig(
     level=logging.INFO,
@@ -64,6 +64,9 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
 )
 logger = logging.getLogger("dashboard_backend")
+
+# Apply safe schema migrations before serving requests.
+init_db()
 
 app = Flask(__name__)
 

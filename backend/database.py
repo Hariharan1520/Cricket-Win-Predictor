@@ -267,13 +267,23 @@ def init_db(target_engine=None):
                 conn.execute(text("ALTER TABLE matches ADD COLUMN updated_at TIMESTAMP"))
 
         if "deliveries" in table_names:
-            d_cols = {c["name"] for c in inspector.get_columns("deliveries")}
-            if "batting_team" not in d_cols:
-                conn.execute(text("ALTER TABLE deliveries ADD COLUMN batting_team VARCHAR(128)"))
-            if "bowling_team" not in d_cols:
-                conn.execute(text("ALTER TABLE deliveries ADD COLUMN bowling_team VARCHAR(128)"))
-            if "delivery_order" not in d_cols:
-                conn.execute(text("ALTER TABLE deliveries ADD COLUMN delivery_order INTEGER"))
+            delivery_columns = (
+                ("batting_team", "VARCHAR(128)"),
+                ("bowling_team", "VARCHAR(128)"),
+                ("delivery_order", "INTEGER"),
+            )
+            if conn.dialect.name == "postgresql":
+                for column_name, column_type in delivery_columns:
+                    conn.execute(text(
+                        f"ALTER TABLE deliveries ADD COLUMN IF NOT EXISTS {column_name} {column_type}"
+                    ))
+            else:
+                d_cols = {c["name"] for c in inspector.get_columns("deliveries")}
+                for column_name, column_type in delivery_columns:
+                    if column_name not in d_cols:
+                        conn.execute(text(
+                            f"ALTER TABLE deliveries ADD COLUMN {column_name} {column_type}"
+                        ))
 
         if "match_states" in table_names:
             ms_cols = {c["name"] for c in inspector.get_columns("match_states")}

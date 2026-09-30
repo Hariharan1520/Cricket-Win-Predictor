@@ -45,7 +45,7 @@ os.environ["DATABASE_URL"] = f"sqlite:///{TEST_DB_PATH}"
 
 from sqlalchemy import MetaData, create_engine, inspect, text
 from sqlalchemy.dialects import postgresql
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.schema import CreateTable
 
@@ -280,6 +280,92 @@ class TestProbabilitySwingMigration(unittest.TestCase):
         self.assertEqual(migrated.current_score, 30.0)
         migrated.probability_swing = None
         session.commit()
+        session.close()
+        engine.dispose()
+
+
+class TestDeliveryColumnsMigration(unittest.TestCase):
+    def test_legacy_delivery_schema_migrates_without_losing_rows(self):
+        engine = create_engine("sqlite:///:memory:", echo=False)
+        Match.__table__.create(bind=engine)
+        with engine.begin() as connection:
+            connection.execute(text("""
+                CREATE TABLE deliveries (
+                    id INTEGER PRIMARY KEY,
+                    match_id VARCHAR(128) NOT NULL,
+                    innings INTEGER NOT NULL,
+                    over_number INTEGER NOT NULL,
+                    ball_number INTEGER NOT NULL,
+                    legal_ball_number INTEGER NOT NULL,
+                    batter VARCHAR(128),
+                    bowler VARCHAR(128),
+                    non_striker VARCHAR(128),
+                    runs_batter INTEGER NOT NULL DEFAULT 0,
+                    runs_total INTEGER NOT NULL DEFAULT 0,
+                    extras INTEGER NOT NULL DEFAULT 0,
+                    wickets INTEGER NOT NULL DEFAULT 0,
+                    raw_info TEXT,
+                    CONSTRAINT uq_match_delivery
+                        UNIQUE (match_id, innings, over_number, ball_number)
+                )
+            """))
+
+        Session = sessionmaker(bind=engine)
+        session = Session()
+        session.add(Match(
+            match_id="legacy-delivery",
+            name="Legacy Delivery Match",
+            analysis_available=True,
+        ))
+        session.commit()
+        with engine.begin() as connection:
+            connection.execute(text("""
+                INSERT INTO deliveries (
+                    id, match_id, innings, over_number, ball_number,
+                    legal_ball_number, batter, bowler, non_striker,
+                    runs_batter, runs_total, extras, wickets, raw_info
+                ) VALUES (
+                    41, 'legacy-delivery', 2, 3, 2, 20, 'Batter',
+                    'Bowler', 'Partner', 4, 4, 0, 0, '{}'
+                )
+            """))
+
+        with self.assertRaises(OperationalError):
+            session.query(Delivery).filter_by(match_id="legacy-delivery").all()
+        session.rollback()
+
+        init_db(target_engine=engine)
+        init_db(target_engine=engine)
+
+        delivery_columns = {
+            column["name"]: column
+            for column in inspect(engine).get_columns("deliveries")
+        }
+        self.assertTrue(delivery_columns["batting_team"]["nullable"])
+        self.assertTrue(delivery_columns["bowling_team"]["nullable"])
+        self.assertTrue(delivery_columns["delivery_order"]["nullable"])
+
+        migrated = session.query(Delivery).filter_by(match_id="legacy-delivery").one()
+        self.assertEqual(migrated.id, 41)
+        self.assertEqual(migrated.batter, "Batter")
+        self.assertEqual(migrated.runs_total, 4)
+        self.assertIsNone(migrated.batting_team)
+        self.assertIsNone(migrated.bowling_team)
+        self.assertIsNone(migrated.delivery_order)
+
+        from backend.app import app
+
+        client = app.test_client()
+        with patch("backend.app.get_db_session", return_value=iter([session])):
+            recent_response = client.get("/api/recent/matches")
+        self.assertEqual(recent_response.status_code, 200)
+        self.assertEqual(recent_response.get_json()["matches"][0]["deliveries_count"], 1)
+
+        with patch("backend.app.get_db_session", return_value=iter([session])):
+            detail_response = client.get("/api/recent/matches/legacy-delivery")
+        self.assertEqual(detail_response.status_code, 200)
+        self.assertFalse(detail_response.get_json()["available"])
+
         session.close()
         engine.dispose()
 

@@ -43,8 +43,10 @@ from src.live.live_features import (
     NormalizedMatch,
     extract_match_state_features,
     filter_t20_matches,
+    is_completed_match,
     is_t20_match,
     normalize_match_dict,
+    normalize_match_status,
 )
 from src.live.live_match import (
     LivePredictionResult,
@@ -156,14 +158,24 @@ def get_live_matches():
         all_norm = [normalize_match_dict(m) for m in raw_matches]
         t20_matches = filter_t20_matches(all_norm)
 
+        # LIVE endpoint: exclude matches that are already completed.
+        # /currentMatches can return recently-finished matches (matchEnded=True
+        # or status text contains a result like "won by").  They must never appear
+        # in the Live Matches section.
+        if not include_recent:
+            display_matches = [m for m in t20_matches if not is_completed_match(m)]
+        else:
+            display_matches = t20_matches
+
         match_list = []
-        for m in t20_matches:
+        for m in display_matches:
             match_list.append(
                 {
                     "match_id": m.match_id,
                     "name": m.name,
                     "format": m.match_type.upper() if m.match_type else "T20",
                     "status": m.status,
+                    "normalized_status": normalize_match_status(m),
                     "venue": m.venue,
                     "teams": m.teams,
                     "match_started": m.match_started,

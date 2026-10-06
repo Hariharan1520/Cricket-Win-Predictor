@@ -32,9 +32,11 @@ from src.live.live_features import (
     NormalizedInnings,
     extract_match_state_features,
     filter_t20_matches,
+    is_completed_match,
     is_t20_format,
     is_t20_match,
     normalize_match_dict,
+    normalize_match_status,
     parse_cricket_overs,
 )
 from src.live.live_match import (
@@ -889,6 +891,95 @@ class TestPhase9LiveValidationPipeline(unittest.TestCase):
             with self.assertRaises(CricketApiError) as ctx:
                 client.get_current_matches()
             self.assertIn("timed out", str(ctx.exception).lower())
+
+
+class TestMatchStatusNormalization(unittest.TestCase):
+    """Tests for distinguishing live vs completed vs upcoming matches (Requirements 1-4)."""
+
+    def test_genuine_live_t20_match(self):
+        """1. Genuine live T20 match -> status = live."""
+        match_dict = {
+            "id": "live-1",
+            "name": "Team A vs Team B",
+            "matchType": "t20",
+            "status": "Team B need 24 runs in 18 balls",
+            "matchStarted": True,
+            "matchEnded": False,
+        }
+        self.assertFalse(is_completed_match(match_dict))
+        self.assertEqual(normalize_match_status(match_dict), "live")
+
+        norm = normalize_match_dict(match_dict)
+        self.assertFalse(is_completed_match(norm))
+        self.assertEqual(normalize_match_status(norm), "live")
+
+    def test_completed_t20_match_won_by_wickets(self):
+        """2. Completed T20 match with 'Team A won by 4 wickets' -> status = completed."""
+        match_dict = {
+            "id": "comp-1",
+            "name": "Sri Lanka Women vs Pakistan Women",
+            "matchType": "t20",
+            "status": "Sri Lanka Women won by 4 wickets",
+            "matchStarted": True,
+            "matchEnded": True,
+        }
+        self.assertTrue(is_completed_match(match_dict))
+        self.assertEqual(normalize_match_status(match_dict), "completed")
+
+        norm = normalize_match_dict(match_dict)
+        self.assertTrue(is_completed_match(norm))
+        self.assertEqual(normalize_match_status(norm), "completed")
+
+    def test_completed_t20_match_won_by_runs(self):
+        """3. Completed T20 match with 'Team A won by 10 runs' -> status = completed."""
+        match_dict = {
+            "id": "comp-2",
+            "name": "India vs Australia",
+            "matchType": "t20i",
+            "status": "India won by 10 runs",
+            "matchStarted": True,
+            "matchEnded": False,  # even if provider flag is lagged, status text determines completion
+        }
+        self.assertTrue(is_completed_match(match_dict))
+        self.assertEqual(normalize_match_status(match_dict), "completed")
+
+        norm = normalize_match_dict(match_dict)
+        self.assertTrue(is_completed_match(norm))
+        self.assertEqual(normalize_match_status(norm), "completed")
+
+    def test_completed_t20_match_tied_no_result_abandoned(self):
+        """4. Match tied / no result / abandoned -> status = completed."""
+        statuses = [
+            "Match tied",
+            "Match tied (Super Over won by Team A)",
+            "Match abandoned without a ball bowled",
+            "No result due to rain",
+            "Match drawn",
+        ]
+        for st in statuses:
+            m = {
+                "id": f"comp-{st[:4]}",
+                "name": "Match X",
+                "matchType": "t20",
+                "status": st,
+                "matchStarted": True,
+                "matchEnded": False,
+            }
+            self.assertTrue(is_completed_match(m), f"Failed for status: {st}")
+            self.assertEqual(normalize_match_status(m), "completed", f"Failed for status: {st}")
+
+    def test_upcoming_t20_match(self):
+        """Upcoming T20 match (not started) -> status = upcoming."""
+        match_dict = {
+            "id": "up-1",
+            "name": "England vs South Africa",
+            "matchType": "t20i",
+            "status": "Match starts at 19:00 local time",
+            "matchStarted": False,
+            "matchEnded": False,
+        }
+        self.assertFalse(is_completed_match(match_dict))
+        self.assertEqual(normalize_match_status(match_dict), "upcoming")
 
 
 if __name__ == "__main__":

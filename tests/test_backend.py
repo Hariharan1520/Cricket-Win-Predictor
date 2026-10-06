@@ -37,8 +37,8 @@ class TestBackendAPI(unittest.TestCase):
         mock_client.get_current_matches.return_value = [
             {"id": "m1", "name": "Test Match", "matchType": "test", "status": "Day 1"},
             {"id": "m2", "name": "ODI Match", "matchType": "odi", "status": "Innings break"},
-            {"id": "m3", "name": "T20 Match", "matchType": "t20", "status": "Live"},
-            {"id": "m4", "name": "T20I Match", "matchType": "t20i", "status": "Live"},
+            {"id": "m3", "name": "T20 Match", "matchType": "t20", "status": "Live", "matchStarted": True, "matchEnded": False},
+            {"id": "m4", "name": "T20I Match", "matchType": "t20i", "status": "Live", "matchStarted": True, "matchEnded": False},
         ]
         mock_client_factory.return_value = mock_client
 
@@ -52,6 +52,82 @@ class TestBackendAPI(unittest.TestCase):
         self.assertIn("m4", match_ids)
         self.assertNotIn("m1", match_ids)
         self.assertNotIn("m2", match_ids)
+
+    @patch("backend.app.get_api_client")
+    def test_matches_completed_t20_filtered_out_from_live(self, mock_client_factory):
+        """Test 5 & 6: Completed matches returned by currentMatches must NOT appear in live matches."""
+        mock_client = MagicMock()
+        mock_client.get_current_matches.return_value = [
+            # Completed match with matchEnded=True
+            {
+                "id": "c1",
+                "name": "Sri Lanka Women vs Pakistan Women",
+                "matchType": "t20",
+                "status": "Sri Lanka Women won by 4 wickets",
+                "matchStarted": True,
+                "matchEnded": True,
+            },
+            # Completed match by status text ("won by 10 runs")
+            {
+                "id": "c2",
+                "name": "India vs Australia",
+                "matchType": "t20i",
+                "status": "India won by 10 runs",
+                "matchStarted": True,
+                "matchEnded": False,
+            },
+            # Abandoned match
+            {
+                "id": "c3",
+                "name": "New Zealand vs South Africa",
+                "matchType": "t20i",
+                "status": "Match abandoned without a ball bowled",
+                "matchStarted": True,
+                "matchEnded": False,
+            },
+            # Genuine live match
+            {
+                "id": "live-1",
+                "name": "England vs West Indies",
+                "matchType": "t20",
+                "status": "West Indies need 35 runs in 22 balls",
+                "matchStarted": True,
+                "matchEnded": False,
+            },
+        ]
+        mock_client_factory.return_value = mock_client
+
+        resp = self.client.get("/api/matches")
+        self.assertEqual(resp.status_code, 200)
+        data = resp.get_json()
+        matches = data.get("matches", [])
+
+        # Only the genuine live match should be returned
+        self.assertEqual(len(matches), 1)
+        self.assertEqual(matches[0]["match_id"], "live-1")
+        self.assertEqual(matches[0]["normalized_status"], "live")
+
+    @patch("backend.app.get_api_client")
+    def test_matches_includes_normalized_status(self, mock_client_factory):
+        """Verify the backend provides explicit normalized_status to frontend."""
+        mock_client = MagicMock()
+        mock_client.get_current_matches.return_value = [
+            {
+                "id": "live-m",
+                "name": "Team A vs Team B",
+                "matchType": "t20",
+                "status": "Team B need 12 in 6",
+                "matchStarted": True,
+                "matchEnded": False,
+            }
+        ]
+        mock_client_factory.return_value = mock_client
+
+        resp = self.client.get("/api/matches")
+        self.assertEqual(resp.status_code, 200)
+        matches = resp.get_json().get("matches", [])
+        self.assertEqual(len(matches), 1)
+        self.assertEqual(matches[0]["normalized_status"], "live")
 
     @patch("backend.app.get_api_client")
     def test_matches_empty_when_no_live_t20(self, mock_client_factory):

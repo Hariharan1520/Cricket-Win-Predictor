@@ -228,6 +228,72 @@ def filter_t20_matches(
     return [m for m in matches if is_t20_match(m)]
 
 
+# Status keywords that conclusively indicate a match is over.
+# Used by is_completed_match() to detect completion from provider status text.
+_COMPLETED_STATUS_KEYWORDS: List[str] = [
+    "won by",          # "India won by 4 wickets", "Australia won by 10 runs"
+    "match tied",      # "Match tied"
+    " tied",           # "The match was tied"
+    "no result",       # "No result"
+    "abandoned",       # "Match abandoned"
+    "match drawn",     # "Match drawn"
+    "match called off",
+    "cancelled",
+    "result - ",       # "Result - India won"
+]
+
+
+def is_completed_match(match: Union[NormalizedMatch, Dict[str, Any]]) -> bool:
+    """
+    Returns True if a match is definitively completed.
+
+    Uses two independent signals (prefer structural over textual):
+      1. match_ended flag from the provider (most reliable).
+      2. Result text in status field (e.g. "won by", "tied", "abandoned").
+
+    A match that satisfies either signal is classified as completed.
+    This ensures that matches returned via /currentMatches which have already
+    finished are never presented in the Live Matches section.
+    """
+    if isinstance(match, NormalizedMatch):
+        if match.match_ended:
+            return True
+        status_lower = match.status.lower()
+    elif isinstance(match, dict):
+        if bool(match.get("matchEnded", False)):
+            return True
+        status_lower = str(match.get("status", "")).lower()
+    else:
+        return False
+
+    return any(kw in status_lower for kw in _COMPLETED_STATUS_KEYWORDS)
+
+
+def normalize_match_status(match: Union[NormalizedMatch, Dict[str, Any]]) -> str:
+    """
+    Returns a normalized match status: "live", "completed", or "upcoming".
+
+    Priority order:
+      1. If match is completed (match_ended=True OR result keyword in status) → "completed"
+      2. If match has not yet started (matchStarted=False)                    → "upcoming"
+      3. Otherwise                                                             → "live"
+    """
+    if is_completed_match(match):
+        return "completed"
+
+    if isinstance(match, NormalizedMatch):
+        started = match.match_started
+    elif isinstance(match, dict):
+        started = bool(match.get("matchStarted", False))
+    else:
+        started = False
+
+    if not started:
+        return "upcoming"
+
+    return "live"
+
+
 def extract_match_state_features(
     norm_match: NormalizedMatch,
 ) -> Tuple[Optional[LiveMatchFeatures], Optional[str]]:

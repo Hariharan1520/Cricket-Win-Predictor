@@ -40,12 +40,17 @@ function EventBadge({ label }) {
   );
 }
 
-export default function ProbabilitySwings({ recentSwings, isRecent = false }) {
+export default function ProbabilitySwings({
+  recentSwings,
+  isRecent = false,
+  chasingTeam = 'Chasing Team',
+  defendingTeam = 'Defending Team',
+}) {
   const defaultSwings = [
-    { delivery: '14.3', event: 'FOUR', swing: '+4.8%', type: 'positive' },
-    { delivery: '13.5', event: 'WICKET', swing: '-7.4%', type: 'negative' },
-    { delivery: '12.6', event: 'SIX', swing: '+8.2%', type: 'positive' },
-    { delivery: '11.2', event: 'DOT BALL', swing: '-1.8%', type: 'negative' },
+    { delivery: '14.3', event: 'FOUR', swing: '+4.8 pp', type: 'positive', benefiting_team: chasingTeam },
+    { delivery: '13.5', event: 'WICKET', swing: '-7.4 pp', type: 'negative', benefiting_team: defendingTeam },
+    { delivery: '12.6', event: 'SIX', swing: '+8.2 pp', type: 'positive', benefiting_team: chasingTeam },
+    { delivery: '11.2', event: 'DOT BALL', swing: '-1.8 pp', type: 'negative', benefiting_team: defendingTeam },
   ];
 
   const swings = recentSwings && recentSwings.length > 0
@@ -61,14 +66,14 @@ export default function ProbabilitySwings({ recentSwings, isRecent = false }) {
         <div className="flex items-start justify-between mb-4">
           <div>
             <h3 className="text-sm font-bold text-[#172B4D] tracking-tight m-0">
-              KEY PROBABILITY SWINGS
+              {isRecent ? 'KEY TURNING POINTS' : 'KEY PROBABILITY SWINGS'}
             </h3>
             <p className="text-xs text-[#667085] m-0 mt-0.5">
-              Largest model probability changes
+              {isRecent ? 'Largest match-defining probability shifts' : 'Largest model probability changes'}
             </p>
           </div>
           <span className="text-[11px] font-mono text-[#8A98A8]">
-            OVER · DELTA
+            OVER · DELTA (pp)
           </span>
         </div>
 
@@ -83,6 +88,18 @@ export default function ProbabilitySwings({ recentSwings, isRecent = false }) {
             const isPos = s.type === 'positive' || (typeof s.swing === 'string' && s.swing.startsWith('+'));
             const isNeg = s.type === 'negative' || (typeof s.swing === 'string' && s.swing.startsWith('-'));
 
+            // Ensure pp unit formatting
+            let displaySwing = s.swing;
+            if (typeof displaySwing === 'string') {
+              if (displaySwing.endsWith('%')) {
+                displaySwing = displaySwing.replace('%', ' pp');
+              } else if (!displaySwing.includes('pp')) {
+                displaySwing = `${displaySwing} pp`;
+              }
+            }
+
+            const teamBenefited = s.benefiting_team || (isPos ? chasingTeam : isNeg ? defendingTeam : null);
+
             return (
               <div
                 key={idx}
@@ -95,8 +112,21 @@ export default function ProbabilitySwings({ recentSwings, isRecent = false }) {
                     <div className="text-xs font-bold text-[#172B4D] leading-tight">
                       {s.event.toUpperCase()}
                     </div>
-                    <div className="text-[11px] text-[#8A98A8] font-mono mt-0.5">
-                      Over {s.delivery}
+                    <div className="flex items-center gap-2 mt-0.5">
+                      <span className="text-[11px] text-[#8A98A8] font-mono">
+                        Over {s.delivery}
+                      </span>
+                      {teamBenefited && (
+                        <span className={`text-[10px] font-semibold px-1.5 py-0.2 rounded border ${
+                          isPos
+                            ? 'bg-[#EAF8F2] text-[#0B9F72] border-[#0B9F72]/20'
+                            : isNeg
+                            ? 'bg-[#FFF0F2] text-[#EF5B67] border-[#EF5B67]/20'
+                            : 'bg-white text-[#667085] border-[#E3EAF0]'
+                        }`}>
+                          {teamBenefited} benefit
+                        </span>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -111,7 +141,7 @@ export default function ProbabilitySwings({ recentSwings, isRecent = false }) {
                       : 'bg-white text-[#667085] border border-[#E3EAF0]'
                   }`}
                 >
-                  <span>{s.swing}</span>
+                  <span>{displaySwing}</span>
                   {isPos ? (
                     <ArrowUpRight className="w-3.5 h-3.5" />
                   ) : isNeg ? (

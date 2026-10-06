@@ -955,6 +955,9 @@ class TestRecentMatchesAPI(unittest.TestCase):
         self.assertEqual(swing["state_id"], stored_state["id"])
         self.assertEqual(swing["delivery_id"], stored_state["delivery_id"])
         self.assertEqual(swing["delivery"], "18.1")
+        self.assertEqual(swing["benefiting_team"], "India")  # India is chasing, positive swing benefits chasing
+        self.assertIn("pp", swing["swing"])  # Percentage points formatting
+        self.assertIn("defending_wickets", data)  # First-innings wickets metadata
 
     def test_empty_historical_swing_list_has_no_completion_placeholder(self):
         state = self.db.query(MatchState).filter_by(match_id="api-test-m1").one()

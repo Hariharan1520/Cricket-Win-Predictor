@@ -554,12 +554,20 @@ def get_recent_match_detail(match_id: str):
                 if s.probability_swing is not None and abs(s.probability_swing) >= 0.005
             ]
 
+            chasing_team = m.team_2 or "Team 2"
+            defending_team = m.team_1 or "Team 1"
+
+            # Compute innings 1 actual wickets from deliveries if available
+            inn1_deliveries = [d for d in deliveries if d.innings == 1]
+            defending_wickets = sum(d.wickets for d in inn1_deliveries) if inn1_deliveries else 0
+
             recent_swings = []
             for s in swings_candidates[-5:]:
                 s_deliv = deliv_by_id.get(s.delivery_id)
-                swing_pct = round(s.probability_swing * 100, 1)
-                swing_str = f"+{swing_pct}%" if swing_pct > 0 else f"{swing_pct}%"
-                swing_type = "positive" if swing_pct > 0 else "negative" if swing_pct < 0 else "neutral"
+                swing_val_pp = round(s.probability_swing * 100, 1)
+                swing_str = f"+{swing_val_pp} pp" if swing_val_pp > 0 else f"{swing_val_pp} pp"
+                swing_type = "positive" if swing_val_pp > 0 else "negative" if swing_val_pp < 0 else "neutral"
+                benefiting_team = chasing_team if s.probability_swing > 0 else defending_team
                 recent_swings.append(
                     {
                         "delivery": (
@@ -570,12 +578,13 @@ def get_recent_match_detail(match_id: str):
                         "swing": swing_str,
                         "type": swing_type,
                         "swing_value": s.probability_swing,
+                        "benefiting_team": benefiting_team,
                         "state_id": s.id,
                         "delivery_id": s.delivery_id,
                     }
                 )
 
-            # Significant swing events: top absolute magnitude swings
+            # Significant swing events: top absolute magnitude swings across ENTIRE match
             sorted_swings = sorted(
                 [s for s in states if s.probability_swing is not None],
                 key=lambda s: abs(s.probability_swing),
@@ -584,7 +593,8 @@ def get_recent_match_detail(match_id: str):
             significant_swings = []
             for s in sorted_swings[:6]:
                 s_deliv = deliv_by_id.get(s.delivery_id)
-                s_pct = round(s.probability_swing * 100, 1)
+                s_val_pp = round(s.probability_swing * 100, 1)
+                benefiting_team = chasing_team if s.probability_swing > 0 else defending_team
                 significant_swings.append(
                     {
                         "delivery": (
@@ -592,9 +602,10 @@ def get_recent_match_detail(match_id: str):
                             if s_deliv else f"Over {s.overs_completed:.1f}"
                         ),
                         "event": _build_event_label(s, s_deliv),
-                        "swing": f"+{s_pct}%" if s_pct > 0 else f"{s_pct}%",
+                        "swing": f"+{s_val_pp} pp" if s_val_pp > 0 else f"{s_val_pp} pp",
                         "absolute_swing": round(abs(s.probability_swing) * 100, 1),
-                        "type": "positive" if s_pct > 0 else "negative",
+                        "type": "positive" if s_val_pp > 0 else "negative",
+                        "benefiting_team": benefiting_team,
                         "state_id": s.id,
                         "delivery_id": s.delivery_id,
                     }
@@ -648,6 +659,7 @@ def get_recent_match_detail(match_id: str):
                     "venue": m.venue,
                     "chasing_team": chasing_team,
                     "defending_team": defending_team,
+                    "defending_wickets": defending_wickets,
                     "final_score": final_score_dict,
                     "innings_information": innings_info,
                     "current_score": latest_state.current_score,

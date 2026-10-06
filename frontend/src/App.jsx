@@ -274,7 +274,12 @@ export default function App() {
                 />
               </div>
               <div className="lg:col-span-5">
-                <ProbabilitySwings recentSwings={selectedMatch.recent_swings} isRecent={isRecent} />
+                <ProbabilitySwings
+                  recentSwings={isRecent && selectedMatch.significant_swing_events?.length > 0 ? selectedMatch.significant_swing_events : selectedMatch.recent_swings}
+                  isRecent={isRecent}
+                  chasingTeam={selectedMatch.chasing_team}
+                  defendingTeam={selectedMatch.defending_team}
+                />
               </div>
             </div>
 

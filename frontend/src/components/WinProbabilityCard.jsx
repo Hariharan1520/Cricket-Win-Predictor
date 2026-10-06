@@ -83,7 +83,7 @@ export default function WinProbabilityCard({ match, isRecent = false, isDemo = f
               )}
               <span>
                 LATEST SWING {isPos ? '↑ ' : isNeg ? '↓ ' : ''}
-                {Math.abs(swingVal).toFixed(1)}%
+                {Math.abs(swingVal).toFixed(1)} pp
               </span>
             </div>
           )}

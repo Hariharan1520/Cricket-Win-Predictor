@@ -147,6 +147,7 @@ export default function MatchHeader({ match, isRecent = false, isDemo = false })
         </div>
 
         {/* Center: Target Centerpiece (Anchor with #EEF5FC soft background) */}
+        {/* Center: Target Centerpiece / Outcome (Anchor with #EEF5FC soft background) */}
         <div className="md:col-span-2 flex flex-col items-center justify-center p-3.5 rounded-2xl bg-[#EEF5FC] border border-[#D0E2FF] text-center shadow-xs">
           <div className="text-[10px] font-bold uppercase tracking-wider text-[#667085] mb-0.5">
             TARGET
@@ -154,17 +155,33 @@ export default function MatchHeader({ match, isRecent = false, isDemo = false })
           <div className="text-3xl font-mono font-black text-[#172B4D] tabular-nums leading-none">
             {targetRounded}
           </div>
-          <div className="text-[11px] font-bold text-[#0B9F72] mt-2 uppercase leading-tight">
-            {chasing_team.toUpperCase()} NEED
-          </div>
-          <div className="text-xs font-black text-[#172B4D] mt-0.5 leading-tight">
-            {runsRemainingRounded} RUNS FROM {balls_remaining} BALLS
-          </div>
-          <div className="flex items-center gap-2 text-[10.5px] font-mono font-semibold text-[#667085] mt-2 pt-1.5 border-t border-[#D0E2FF] w-full justify-center">
-            <span>CRR {current_run_rate.toFixed(2)}</span>
-            <span>·</span>
-            <span>RRR {required_run_rate.toFixed(2)}</span>
-          </div>
+          {isHistorical || is_terminal ? (
+            <>
+              <div className="text-[11px] font-bold text-[#0B9F72] mt-2 uppercase leading-tight">
+                FINAL RESULT
+              </div>
+              <div className="text-xs font-black text-[#172B4D] mt-0.5 leading-tight line-clamp-2">
+                {status || (match.winner ? `${match.winner} WON` : 'COMPLETED')}
+              </div>
+              <div className="flex items-center gap-2 text-[10.5px] font-mono font-semibold text-[#667085] mt-2 pt-1.5 border-t border-[#D0E2FF] w-full justify-center">
+                <span>{chasing_team.toUpperCase()}: {Math.round(current_score)}/{wickets_lost}</span>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="text-[11px] font-bold text-[#0B9F72] mt-2 uppercase leading-tight">
+                {chasing_team.toUpperCase()} NEED
+              </div>
+              <div className="text-xs font-black text-[#172B4D] mt-0.5 leading-tight">
+                {runsRemainingRounded} RUNS FROM {balls_remaining} BALLS
+              </div>
+              <div className="flex items-center gap-2 text-[10.5px] font-mono font-semibold text-[#667085] mt-2 pt-1.5 border-t border-[#D0E2FF] w-full justify-center">
+                <span>CRR {current_run_rate.toFixed(2)}</span>
+                <span>·</span>
+                <span>RRR {required_run_rate.toFixed(2)}</span>
+              </div>
+            </>
+          )}
         </div>
 
         {/* Right: Defending Team */}
@@ -181,7 +198,8 @@ export default function MatchHeader({ match, isRecent = false, isDemo = false })
             </div>
             <div className="flex items-baseline md:justify-end gap-3">
               <span className="text-4xl sm:text-5xl font-mono font-black text-[#172B4D] tracking-tight tabular-nums">
-                {defendingScore} / 6
+                {defendingScore}
+                {match.defending_wickets != null ? ` / ${match.defending_wickets}` : (match.innings_information?.[0]?.wickets != null ? ` / ${match.innings_information[0].wickets}` : '')}
               </span>
               <span className="text-sm font-mono font-bold text-[#667085]">
                 20.0 OVERS
